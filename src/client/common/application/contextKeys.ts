@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 export enum ExtensionContextKey {
+    showInstallPythonTile = 'showInstallPythonTile',
     HasFailedTests = 'hasFailedTests',
-    InShowRunFailedTestsExperiment = 'inShowRunFailedTestsExperiment',
     RefreshingTests = 'refreshingTests',
-    InShowRefreshingTestsExperiment = 'inShowRefreshingTestsExperiment',
+    IsJupyterInstalled = 'isJupyterInstalled',
 }

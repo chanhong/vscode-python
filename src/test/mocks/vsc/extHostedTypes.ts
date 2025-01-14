@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/explicit-module-boundary-types */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable max-classes-per-file */
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
@@ -5,14 +7,14 @@
 'use strict';
 
 import { relative } from 'path';
-import type * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import * as vscMockHtmlContent from './htmlContent';
 import * as vscMockStrings from './strings';
 import * as vscUri from './uri';
 import { generateUuid } from './uuid';
 
 export enum NotebookCellKind {
-    Markdown = 1,
+    Markup = 1,
     Code = 2,
 }
 
@@ -491,11 +493,11 @@ export class TextEdit {
         return ret;
     }
 
-    protected _range: Range = new Range(new Position(0, 0), new Position(0, 0));
+    _range: Range = new Range(new Position(0, 0), new Position(0, 0));
 
-    protected _newText = '';
+    newText = '';
 
-    protected _newEol: EndOfLine = EndOfLine.LF;
+    _newEol: EndOfLine = EndOfLine.LF;
 
     get range(): Range {
         return this._range;
@@ -506,17 +508,6 @@ export class TextEdit {
             throw illegalArgument('range');
         }
         this._range = value;
-    }
-
-    get newText(): string {
-        return this._newText || '';
-    }
-
-    set newText(value: string) {
-        if (value && typeof value !== 'string') {
-            throw illegalArgument('newText');
-        }
-        this._newText = value;
     }
 
     get newEol(): EndOfLine {
@@ -533,14 +524,6 @@ export class TextEdit {
     constructor(range: Range, newText: string) {
         this.range = range;
         this.newText = newText;
-    }
-
-    toJSON(): { range: Range; newText: string; newEol: EndOfLine } {
-        return {
-            range: this.range,
-            newText: this.newText,
-            newEol: this._newEol,
-        };
     }
 }
 
@@ -578,11 +561,6 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
     }
 
     // eslint-disable-next-line class-methods-use-this
-    replaceNotebookMetadata(_uri: vscode.Uri, _value: vscode.NotebookDocumentMetadata): void {
-        // Noop.
-    }
-
-    // eslint-disable-next-line class-methods-use-this
     replaceNotebookCells(
         _uri: vscode.Uri,
         _start: number,
@@ -598,16 +576,6 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
         _uri: vscode.Uri,
         _index: number,
         _outputs: vscode.NotebookCellOutput[],
-        _metadata?: vscode.WorkspaceEditEntryMetadata,
-    ): void {
-        // Noop.
-    }
-
-    // eslint-disable-next-line class-methods-use-this
-    replaceNotebookCellMetadata(
-        _uri: vscode.Uri,
-        _index: number,
-        _cellMetadata: vscode.NotebookCellMetadata,
         _metadata?: vscode.WorkspaceEditEntryMetadata,
     ): void {
         // Noop.
@@ -677,7 +645,7 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
         return this._textEdits.has(uri.toString());
     }
 
-    set(uri: vscUri.URI, edits: TextEdit[]): void {
+    set(uri: vscUri.URI, edits: readonly unknown[]): void {
         let data = this._textEdits.get(uri.toString());
         if (!data) {
             data = { seq: this._seqPool += 1, uri, edits: [] };
@@ -686,7 +654,7 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
         if (!edits) {
             data.edits = [];
         } else {
-            data.edits = edits.slice(0);
+            data.edits = edits.slice(0) as TextEdit[];
         }
     }
 
@@ -807,7 +775,7 @@ export class SnippetString {
             this._tabstop = nested._tabstop;
             defaultValue = nested.value;
         } else if (typeof defaultValue === 'string') {
-            defaultValue = defaultValue.replace(/\$|}/g, '\\$&');
+            defaultValue = defaultValue.replace(/\$|}/g, '\\$&'); // CodeQL [SM02383] don't escape backslashes here (by design)
         }
 
         this.value += '${';
@@ -926,19 +894,16 @@ export class Diagnostic {
 }
 
 export class Hover {
-    public contents: vscode.MarkdownString[] | vscode.MarkedString[];
+    public contents: vscode.MarkdownString[];
 
     public range: Range;
 
-    constructor(
-        contents: vscode.MarkdownString | vscode.MarkedString | vscode.MarkdownString[] | vscode.MarkedString[],
-        range?: Range,
-    ) {
+    constructor(contents: vscode.MarkdownString | vscode.MarkdownString[], range?: Range) {
         if (!contents) {
             throw new Error('Illegal argument, contents must be defined');
         }
         if (Array.isArray(contents)) {
-            this.contents = <vscode.MarkdownString[] | vscode.MarkedString[]>contents;
+            this.contents = <vscode.MarkdownString[]>contents;
         } else if (vscMockHtmlContent.isMarkdownString(contents)) {
             this.contents = [contents];
         } else {
@@ -1541,6 +1506,8 @@ export enum TaskPanelKind {
 export class TaskGroup implements vscode.TaskGroup {
     private _id: string;
 
+    public isDefault = undefined;
+
     public static Clean: TaskGroup = new TaskGroup('clean', 'Clean');
 
     public static Build: TaskGroup = new TaskGroup('build', 'Build');
@@ -2091,6 +2058,8 @@ export enum ConfigurationTarget {
 }
 
 export class RelativePattern implements IRelativePattern {
+    baseUri: vscode.Uri;
+
     base: string;
 
     pattern: string;
@@ -2106,6 +2075,7 @@ export class RelativePattern implements IRelativePattern {
             throw illegalArgument('pattern');
         }
 
+        this.baseUri = typeof base === 'string' ? vscUri.URI.parse(base) : base.uri;
         this.base = typeof base === 'string' ? base : base.uri.fsPath;
         this.pattern = pattern;
     }
@@ -2291,4 +2261,73 @@ export enum CommentThreadCollapsibleState {
 
 export class QuickInputButtons {
     static readonly Back: vscode.QuickInputButton = { iconPath: vscUri.URI.file('back') };
+}
+
+export enum SymbolTag {
+    Deprecated = 1,
+}
+
+export class TypeHierarchyItem {
+    name: string;
+
+    kind: SymbolKind;
+
+    tags?: ReadonlyArray<SymbolTag>;
+
+    detail?: string;
+
+    uri: vscode.Uri;
+
+    range: Range;
+
+    selectionRange: Range;
+
+    constructor(kind: SymbolKind, name: string, detail: string, uri: vscode.Uri, range: Range, selectionRange: Range) {
+        this.name = name;
+        this.kind = kind;
+        this.detail = detail;
+        this.uri = uri;
+        this.range = range;
+        this.selectionRange = selectionRange;
+    }
+}
+
+export declare type LSPObject = {
+    [key: string]: LSPAny;
+};
+
+export declare type LSPArray = LSPAny[];
+
+export declare type integer = number;
+export declare type uinteger = number;
+export declare type decimal = number;
+
+export declare type LSPAny = LSPObject | LSPArray | string | integer | uinteger | decimal | boolean | null;
+
+export class ProtocolTypeHierarchyItem extends TypeHierarchyItem {
+    data?;
+
+    constructor(
+        kind: SymbolKind,
+        name: string,
+        detail: string,
+        uri: vscode.Uri,
+        range: Range,
+        selectionRange: Range,
+        data?: LSPAny,
+    ) {
+        super(kind, name, detail, uri, range, selectionRange);
+        this.data = data;
+    }
+}
+
+export class CancellationError extends Error {}
+
+export class LSPCancellationError extends CancellationError {
+    data;
+
+    constructor(data: any) {
+        super();
+        this.data = data;
+    }
 }

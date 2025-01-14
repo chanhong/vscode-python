@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 import * as path from 'path';
-import { traceVerbose } from '../../../../common/logger';
 import { chain, iterable } from '../../../../common/utils/async';
 import { findInterpretersInDir, looksLikeBasicVirtualPython } from '../../../common/commonUtils';
 import { pathExists } from '../../../common/externalDependencies';
@@ -13,6 +12,7 @@ import { BasicEnvInfo, IPythonEnvsIterator } from '../../locator';
 import { FSWatcherKind, FSWatchingLocator } from './fsWatchingLocator';
 import '../../../../common/extensions';
 import { asyncFilter } from '../../../../common/utils/arrayUtils';
+import { traceVerbose } from '../../../../logging';
 
 /**
  * Default number of levels of sub-directories to recurse when looking for interpreters.
@@ -50,7 +50,9 @@ async function getVirtualEnvKind(interpreterPath: string): Promise<PythonEnvKind
 /**
  * Finds and resolves virtual environments created in workspace roots.
  */
-export class WorkspaceVirtualEnvironmentLocator extends FSWatchingLocator<BasicEnvInfo> {
+export class WorkspaceVirtualEnvironmentLocator extends FSWatchingLocator {
+    public readonly providerId: string = 'workspaceVirtualEnvLocator';
+
     public constructor(private readonly root: string) {
         super(
             () => getWorkspaceVirtualEnvDirs(this.root),
@@ -95,6 +97,7 @@ export class WorkspaceVirtualEnvironmentLocator extends FSWatchingLocator<BasicE
             });
 
             yield* iterable(chain(envGenerators));
+            traceVerbose(`Finished searching for workspace virtual envs`);
         }
 
         return iterator(this.root);

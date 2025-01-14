@@ -3,12 +3,11 @@
 
 import * as path from 'path';
 import { _SCRIPTS_DIR } from './constants';
-import { SymbolProviderSymbols } from './types';
 
 const SCRIPTS_DIR = _SCRIPTS_DIR;
 
 // "scripts" contains everything relevant to the scripts found under
-// the top-level "pythonFiles" directory.  Each of those scripts has
+// the top-level "python_files" directory.  Each of those scripts has
 // a function in this module which matches the script's filename.
 // Each function provides the commandline arguments that should be
 // used when invoking a Python executable, whether through spawn/exec
@@ -19,16 +18,13 @@ const SCRIPTS_DIR = _SCRIPTS_DIR;
 // into the corresponding object or objects.  "parse()" takes a single
 // string as the stdout text and returns the relevant data.
 //
-// Some of the scripts are located in subdirectories of "pythonFiles".
+// Some of the scripts are located in subdirectories of "python_files".
 // For each of those subdirectories there is a sub-module where
 // those scripts' functions may be found.
 //
 // In some cases one or more types related to a script are exported
 // from the same module in which the script's function is located.
 // These types typically relate to the return type of "parse()".
-//
-// ignored scripts:
-//  * install_debugpy.py  (used only for extension development)
 export * as testingTools from './testing_tools';
 
 // interpreterInfo.py
@@ -42,54 +38,18 @@ export type InterpreterInfoJson = {
     is64Bit: boolean;
 };
 
+export const OUTPUT_MARKER_SCRIPT = path.join(_SCRIPTS_DIR, 'get_output_via_markers.py');
+
 export function interpreterInfo(): [string[], (out: string) => InterpreterInfoJson] {
     const script = path.join(SCRIPTS_DIR, 'interpreterInfo.py');
     const args = [script];
 
     function parse(out: string): InterpreterInfoJson {
-        let json: InterpreterInfoJson;
         try {
-            json = JSON.parse(out);
+            return JSON.parse(out);
         } catch (ex) {
             throw Error(`python ${args} returned bad JSON (${out}) (${ex})`);
         }
-        return json;
-    }
-
-    return [args, parse];
-}
-
-// sortImports.py
-
-export function sortImports(filename: string, sortArgs?: string[]): [string[], (out: string) => string] {
-    const script = path.join(SCRIPTS_DIR, 'sortImports.py');
-    const args = [script, filename, '--diff'];
-    if (sortArgs) {
-        args.push(...sortArgs);
-    }
-
-    function parse(out: string) {
-        // It should just be a diff that the extension will use directly.
-        return out;
-    }
-
-    return [args, parse];
-}
-
-// refactor.py
-
-export function refactor(root: string): [string[], (out: string) => Record<string, unknown>[]] {
-    const script = path.join(SCRIPTS_DIR, 'refactor.py');
-    const args = [script, root];
-
-    // TODO: Make the return type more specific, like we did
-    // with completion().
-    function parse(out: string): Record<string, unknown>[] {
-        // TODO: Also handle "STARTED"?
-        return out
-            .split(/\r?\n/g)
-            .filter((line) => line.length > 0)
-            .map((resp) => JSON.parse(resp));
     }
 
     return [args, parse];
@@ -109,30 +69,10 @@ export function normalizeSelection(): [string[], (out: string) => string] {
     return [args, parse];
 }
 
-// symbolProvider.py
-
-export function symbolProvider(
-    filename: string,
-    // If "text" is provided then it gets passed to the script as-is.
-    text?: string,
-): [string[], (out: string) => SymbolProviderSymbols] {
-    const script = path.join(SCRIPTS_DIR, 'symbolProvider.py');
-    const args = [script, filename];
-    if (text) {
-        args.push(text);
-    }
-
-    function parse(out: string): SymbolProviderSymbols {
-        return JSON.parse(out);
-    }
-
-    return [args, parse];
-}
-
 // printEnvVariables.py
 
 export function printEnvVariables(): [string[], (out: string) => NodeJS.ProcessEnv] {
-    const script = path.join(SCRIPTS_DIR, 'printEnvVariables.py').fileToCommandArgument();
+    const script = path.join(SCRIPTS_DIR, 'printEnvVariables.py').fileToCommandArgumentForPythonExt();
     const args = [script];
 
     function parse(out: string): NodeJS.ProcessEnv {
@@ -151,11 +91,11 @@ export function shell_exec(command: string, lockfile: string, shellArgs: string[
     // could be anything.
     return [
         script,
-        command.fileToCommandArgument(),
+        command.fileToCommandArgumentForPythonExt(),
         // The shell args must come after the command
         // but before the lockfile.
         ...shellArgs,
-        lockfile.fileToCommandArgument(),
+        lockfile.fileToCommandArgumentForPythonExt(),
     ];
 }
 
@@ -163,6 +103,13 @@ export function shell_exec(command: string, lockfile: string, shellArgs: string[
 
 export function testlauncher(testArgs: string[]): string[] {
     const script = path.join(SCRIPTS_DIR, 'testlauncher.py');
+    // There is no output to parse, so we do not return a function.
+    return [script, ...testArgs];
+}
+
+// run_pytest_script.py
+export function pytestlauncher(testArgs: string[]): string[] {
+    const script = path.join(SCRIPTS_DIR, 'vscode_pytest', 'run_pytest_script.py');
     // There is no output to parse, so we do not return a function.
     return [script, ...testArgs];
 }
@@ -176,9 +123,38 @@ export function visualstudio_py_testlauncher(testArgs: string[]): string[] {
     return [script, ...testArgs];
 }
 
+// execution.py
+// eslint-disable-next-line camelcase
+export function execution_py_testlauncher(testArgs: string[]): string[] {
+    const script = path.join(SCRIPTS_DIR, 'unittestadapter', 'execution.py');
+    return [script, ...testArgs];
+}
+
 // tensorboard_launcher.py
 
 export function tensorboardLauncher(args: string[]): string[] {
     const script = path.join(SCRIPTS_DIR, 'tensorboard_launcher.py');
     return [script, ...args];
+}
+
+// linter.py
+
+export function linterScript(): string {
+    const script = path.join(SCRIPTS_DIR, 'linter.py');
+    return script;
+}
+
+export function createVenvScript(): string {
+    const script = path.join(SCRIPTS_DIR, 'create_venv.py');
+    return script;
+}
+
+export function createCondaScript(): string {
+    const script = path.join(SCRIPTS_DIR, 'create_conda.py');
+    return script;
+}
+
+export function installedCheckScript(): string {
+    const script = path.join(SCRIPTS_DIR, 'installed_check.py');
+    return script;
 }

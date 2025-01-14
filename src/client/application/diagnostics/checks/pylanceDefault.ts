@@ -40,7 +40,7 @@ export class PylanceDefaultDiagnosticService extends BaseDiagnosticsService {
         protected readonly messageService: IDiagnosticHandlerService<MessageCommandPrompt>,
         @inject(IDisposableRegistry) disposableRegistry: IDisposableRegistry,
     ) {
-        super([DiagnosticCodes.PylanceDefaultDiagnostic], serviceContainer, disposableRegistry, true);
+        super([DiagnosticCodes.PylanceDefaultDiagnostic], serviceContainer, disposableRegistry, true, true);
 
         this.initialMementoValue = this.context.globalState.get(EXTENSION_VERSION_MEMENTO);
     }
@@ -50,7 +50,7 @@ export class PylanceDefaultDiagnosticService extends BaseDiagnosticsService {
             return [];
         }
 
-        return [new PylanceDefaultDiagnostic(Diagnostics.pylanceDefaultMessage(), resource)];
+        return [new PylanceDefaultDiagnostic(Diagnostics.pylanceDefaultMessage, resource)];
     }
 
     protected async onHandle(diagnostics: IDiagnostic[]): Promise<void> {
@@ -63,7 +63,7 @@ export class PylanceDefaultDiagnosticService extends BaseDiagnosticsService {
             return;
         }
 
-        const options = [{ prompt: Common.ok() }];
+        const options = [{ prompt: Common.ok }];
 
         await this.messageService.handle(diagnostic, {
             commandPrompts: options,

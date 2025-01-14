@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import { TestDiscoveryOptions, TestFilter } from '../../common/types';
-import { getOptionValues, getPositionalArguments, filterArguments } from '../common/argumentsHelper';
+import { TestFilter } from '../../common/types';
+import { getPositionalArguments, filterArguments } from '../common/argumentsHelper';
 
 const OptionsWithArguments = [
     '-c',
@@ -134,19 +134,6 @@ const OptionsWithoutArguments = [
     '-d',
 ];
 
-export function pytestGetTestFolders(args: string[]): string[] {
-    const testDirs = getOptionValues(args, '--rootdir');
-    if (testDirs.length > 0) {
-        return testDirs;
-    }
-
-    const positionalArgs = getPositionalArguments(args, OptionsWithArguments, OptionsWithoutArguments);
-    // Positional args in pytest are files or directories.
-    // Remove files from the args, and what's left are test directories.
-    // If users enter test modules/methods, then its not supported.
-    return positionalArgs.filter((arg) => !arg.toUpperCase().endsWith('.PY'));
-}
-
 export function removePositionalFoldersAndFiles(args: string[]): string[] {
     return pytestFilterArguments(args, TestFilter.removeTests);
 }
@@ -217,7 +204,6 @@ function pytestFilterArguments(args: string[], argumentToRemoveOrFilter: string[
                         '--verbosity',
                         '-r',
                         '--tb',
-                        '--rootdir',
                         '--show-capture',
                         '--durations',
                         '--junit-xml',
@@ -266,17 +252,4 @@ function pytestFilterArguments(args: string[], argumentToRemoveOrFilter: string[
         filteredArgs = filteredArgs.filter((item) => positionalArgs.indexOf(item) === -1);
     }
     return filterArguments(filteredArgs, optionsWithArgsToRemove, optionsWithoutArgsToRemove);
-}
-
-export function preparePytestArgumentsForDiscovery(options: TestDiscoveryOptions): string[] {
-    // Remove unwanted arguments (which happen to be test directories & test specific args).
-    const args = pytestFilterArguments(options.args, TestFilter.discovery);
-    if (options.ignoreCache && args.indexOf('--cache-clear') === -1) {
-        args.splice(0, 0, '--cache-clear');
-    }
-    if (args.indexOf('-s') === -1) {
-        args.splice(0, 0, '-s');
-    }
-    args.splice(0, 0, '--rootdir', options.workspaceFolder.fsPath);
-    return args;
 }

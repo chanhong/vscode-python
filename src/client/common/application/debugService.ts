@@ -13,6 +13,7 @@ import {
     DebugConsole,
     DebugSession,
     DebugSessionCustomEvent,
+    DebugSessionOptions,
     Disposable,
     Event,
     WorkspaceFolder,
@@ -28,7 +29,7 @@ export class DebugService implements IDebugService {
     public get activeDebugSession(): DebugSession | undefined {
         return debug.activeDebugSession;
     }
-    public get breakpoints(): Breakpoint[] {
+    public get breakpoints(): readonly Breakpoint[] {
         return debug.breakpoints;
     }
     public get onDidChangeActiveDebugSession(): Event<DebugSession | undefined> {
@@ -57,7 +58,7 @@ export class DebugService implements IDebugService {
     public startDebugging(
         folder: WorkspaceFolder | undefined,
         nameOrConfiguration: string | DebugConfiguration,
-        parentSession?: DebugSession,
+        parentSession?: DebugSession | DebugSessionOptions,
     ): Thenable<boolean> {
         return debug.startDebugging(folder, nameOrConfiguration, parentSession);
     }

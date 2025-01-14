@@ -7,13 +7,20 @@
 import { assert } from 'chai';
 import * as sinon from 'sinon';
 import { anything, instance, mock, when } from 'ts-mockito';
-import * as tasClient from 'vscode-tas-client';
+import { Disposable } from 'vscode-jsonrpc';
+// sinon can not create a stub if we just point to the exported module
+import * as tasClient from 'vscode-tas-client/vscode-tas-client/VSCodeTasClient';
+import * as expService from 'vscode-tas-client';
+import { TargetPopulation } from 'vscode-tas-client';
 import { ApplicationEnvironment } from '../../../client/common/application/applicationEnvironment';
 import { IApplicationEnvironment, IWorkspaceService } from '../../../client/common/application/types';
 import { WorkspaceService } from '../../../client/common/application/workspace';
 import { Channel } from '../../../client/common/constants';
 import { ExperimentService } from '../../../client/common/experiments/service';
-import { Experiments } from '../../../client/common/utils/localize';
+import { PersistentState } from '../../../client/common/persistentState';
+import { IPersistentStateFactory } from '../../../client/common/types';
+import { registerLogger } from '../../../client/logging';
+import { OutputChannelLogger } from '../../../client/logging/outputChannelLogger';
 import * as Telemetry from '../../../client/telemetry';
 import { EventName } from '../../../client/telemetry/constants';
 import { PVSC_EXTENSION_ID_FOR_TESTS } from '../../constants';
@@ -22,22 +29,31 @@ import { MockMemento } from '../../mocks/mementos';
 
 suite('Experimentation service', () => {
     const extensionVersion = '1.2.3';
+    const dummyExperimentKey = 'experimentsKey';
 
     let workspaceService: IWorkspaceService;
     let appEnvironment: IApplicationEnvironment;
+    let stateFactory: IPersistentStateFactory;
     let globalMemento: MockMemento;
     let outputChannel: MockOutputChannel;
+    let disposeLogger: Disposable;
 
     setup(() => {
         appEnvironment = mock(ApplicationEnvironment);
         workspaceService = mock(WorkspaceService);
+        stateFactory = mock<IPersistentStateFactory>();
         globalMemento = new MockMemento();
+        when(stateFactory.createGlobalPersistentState(anything(), anything())).thenReturn(
+            new PersistentState(globalMemento, dummyExperimentKey, { features: [] }),
+        );
         outputChannel = new MockOutputChannel('');
+        disposeLogger = registerLogger(new OutputChannelLogger(outputChannel));
     });
 
     teardown(() => {
         sinon.restore();
         Telemetry._resetSharedProperties();
+        disposeLogger.dispose();
     });
 
     function configureSettings(enabled: boolean, optInto: string[], optOutFrom: string[]) {
@@ -59,45 +75,45 @@ suite('Experimentation service', () => {
     }
 
     function configureApplicationEnvironment(channel: Channel, version: string, contributes?: Record<string, unknown>) {
-        when(appEnvironment.extensionChannel).thenReturn(channel);
+        when(appEnvironment.channel).thenReturn(channel);
         when(appEnvironment.extensionName).thenReturn(PVSC_EXTENSION_ID_FOR_TESTS);
         when(appEnvironment.packageJson).thenReturn({ version, contributes });
     }
 
     suite('Initialization', () => {
-        test('Users with a release version of the extension should be in the Public target population', () => {
+        test('Users with VS Code stable version should be in the Public target population', () => {
             const getExperimentationServiceStub = sinon.stub(tasClient, 'getExperimentationService');
-
             configureSettings(true, [], []);
             configureApplicationEnvironment('stable', extensionVersion);
 
             // eslint-disable-next-line no-new
-            new ExperimentService(instance(workspaceService), instance(appEnvironment), globalMemento, outputChannel);
+            new ExperimentService(instance(workspaceService), instance(appEnvironment), instance(stateFactory));
 
+            // @ts-ignore I dont know how else to ignore this issue.
             sinon.assert.calledWithExactly(
                 getExperimentationServiceStub,
                 PVSC_EXTENSION_ID_FOR_TESTS,
                 extensionVersion,
-                tasClient.TargetPopulation.Public,
+                sinon.match(TargetPopulation.Public),
                 sinon.match.any,
                 globalMemento,
             );
         });
 
-        test('Users with an Insiders version of the extension should be the Insiders target population', () => {
+        test('Users with VS Code Insiders version should be the Insiders target population', () => {
             const getExperimentationServiceStub = sinon.stub(tasClient, 'getExperimentationService');
 
             configureSettings(true, [], []);
             configureApplicationEnvironment('insiders', extensionVersion);
 
             // eslint-disable-next-line no-new
-            new ExperimentService(instance(workspaceService), instance(appEnvironment), globalMemento, outputChannel);
+            new ExperimentService(instance(workspaceService), instance(appEnvironment), instance(stateFactory));
 
             sinon.assert.calledWithExactly(
                 getExperimentationServiceStub,
                 PVSC_EXTENSION_ID_FOR_TESTS,
                 extensionVersion,
-                tasClient.TargetPopulation.Insiders,
+                sinon.match(TargetPopulation.Insiders),
                 sinon.match.any,
                 globalMemento,
             );
@@ -112,8 +128,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
 
             assert.deepEqual(experimentService._optInto, ['Foo - experiment']);
@@ -127,29 +142,25 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
 
             assert.deepEqual(experimentService._optOutFrom, ['Foo - experiment']);
         });
 
-        test('Experiment data in Memento storage should be logged if it starts with "python"', () => {
+        test('Experiment data in Memento storage should be logged if it starts with "python"', async () => {
             const experiments = ['ExperimentOne', 'pythonExperiment'];
-            globalMemento = mock(MockMemento);
+            globalMemento.update(dummyExperimentKey, { features: experiments });
             configureSettings(true, [], []);
-            configureApplicationEnvironment('stable', extensionVersion);
+            configureApplicationEnvironment('stable', extensionVersion, { configuration: { properties: {} } });
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            when(globalMemento.get(anything(), anything())).thenReturn({ features: experiments } as any);
-
-            new ExperimentService(
+            const exp = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                instance(globalMemento),
-                outputChannel,
+                instance(stateFactory),
             );
-            const output = `${Experiments.inGroup().format('pythonExperiment')}\n`;
+            await exp.activate();
+            const output = "Experiment 'pythonExperiment' is active\n";
 
             assert.strictEqual(outputChannel.output, output);
         });
@@ -157,22 +168,22 @@ suite('Experimentation service', () => {
 
     suite('In-experiment-sync check', () => {
         const experiment = 'Test Experiment - experiment';
-        let telemetryEvents: { eventName: string; properties: Record<string, unknown> }[] = [];
+        let telemetryEvents: { eventName: string; properties: unknown }[] = [];
         let getTreatmentVariable: sinon.SinonStub;
         let sendTelemetryEventStub: sinon.SinonStub;
 
         setup(() => {
             sendTelemetryEventStub = sinon
                 .stub(Telemetry, 'sendTelemetryEvent')
-                .callsFake((eventName: string, _, properties: Record<string, unknown>) => {
+                .callsFake((eventName: string, _, properties: unknown) => {
                     const telemetry = { eventName, properties };
                     telemetryEvents.push(telemetry);
                 });
 
-            getTreatmentVariable = sinon.stub().returns(Promise.resolve(true));
+            getTreatmentVariable = sinon.stub().returns(true);
             sinon.stub(tasClient, 'getExperimentationService').returns(({
                 getTreatmentVariable,
-            } as unknown) as tasClient.IExperimentationService);
+            } as unknown) as expService.IExperimentationService);
 
             configureApplicationEnvironment('stable', extensionVersion);
         });
@@ -188,12 +199,42 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = experimentService.inExperimentSync(experiment);
 
             assert.isTrue(result);
+            sinon.assert.notCalled(sendTelemetryEventStub);
+            sinon.assert.calledOnce(getTreatmentVariable);
+        });
+
+        test('If in control group, return false', async () => {
+            sinon.restore();
+            sendTelemetryEventStub = sinon
+                .stub(Telemetry, 'sendTelemetryEvent')
+                .callsFake((eventName: string, _, properties: unknown) => {
+                    const telemetry = { eventName, properties };
+                    telemetryEvents.push(telemetry);
+                });
+
+            // Control group returns false.
+            getTreatmentVariable = sinon.stub().returns(false);
+            sinon.stub(tasClient, 'getExperimentationService').returns(({
+                getTreatmentVariable,
+            } as unknown) as expService.IExperimentationService);
+
+            configureApplicationEnvironment('stable', extensionVersion);
+
+            configureSettings(true, [], []);
+
+            const experimentService = new ExperimentService(
+                instance(workspaceService),
+                instance(appEnvironment),
+                instance(stateFactory),
+            );
+            const result = experimentService.inExperimentSync(experiment);
+
+            assert.isFalse(result);
             sinon.assert.notCalled(sendTelemetryEventStub);
             sinon.assert.calledOnce(getTreatmentVariable);
         });
@@ -204,8 +245,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = experimentService.inExperimentSync(experiment);
 
@@ -220,8 +260,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = experimentService.inExperimentSync(experiment);
 
@@ -235,8 +274,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = experimentService.inExperimentSync(experiment);
 
@@ -251,8 +289,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = experimentService.inExperimentSync(experiment);
 
@@ -267,8 +304,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = experimentService.inExperimentSync(experiment);
 
@@ -283,8 +319,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = experimentService.inExperimentSync(experiment);
 
@@ -299,8 +334,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = experimentService.inExperimentSync(experiment);
 
@@ -315,8 +349,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = experimentService.inExperimentSync(experiment);
 
@@ -334,7 +367,7 @@ suite('Experimentation service', () => {
             getTreatmentVariableStub = sinon.stub().returns(Promise.resolve('value'));
             sinon.stub(tasClient, 'getExperimentationService').returns(({
                 getTreatmentVariable: getTreatmentVariableStub,
-            } as unknown) as tasClient.IExperimentationService);
+            } as unknown) as expService.IExperimentationService);
 
             configureApplicationEnvironment('stable', extensionVersion);
         });
@@ -345,8 +378,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = await experimentService.getExperimentValue(experiment);
 
@@ -360,8 +392,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = await experimentService.getExperimentValue(experiment);
 
@@ -375,8 +406,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = await experimentService.getExperimentValue(experiment);
 
@@ -390,8 +420,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
             const result = await experimentService.getExperimentValue(experiment);
 
@@ -401,13 +430,13 @@ suite('Experimentation service', () => {
     });
 
     suite('Opt-in/out telemetry', () => {
-        let telemetryEvents: { eventName: string; properties: Record<string, unknown> }[] = [];
+        let telemetryEvents: { eventName: string; properties: unknown }[] = [];
         let sendTelemetryEventStub: sinon.SinonStub;
 
         setup(() => {
             sendTelemetryEventStub = sinon
                 .stub(Telemetry, 'sendTelemetryEvent')
-                .callsFake((eventName: string, _, properties: Record<string, unknown>) => {
+                .callsFake((eventName: string, _, properties: unknown) => {
                     const telemetry = { eventName, properties };
                     telemetryEvents.push(telemetry);
                 });
@@ -426,8 +455,7 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
 
             await experimentService.activate();
@@ -460,14 +488,16 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
 
             await experimentService.activate();
 
             const { properties } = telemetryEvents[1];
-            assert.deepStrictEqual(properties, { optedInto: ['foo'], optedOutFrom: ['bar'] });
+            assert.deepStrictEqual(properties, {
+                optedInto: JSON.stringify(['foo']),
+                optedOutFrom: JSON.stringify(['bar']),
+            });
         });
 
         test('Set telemetry properties to empty arrays if no experiments have been opted into or out from', async () => {
@@ -493,14 +523,13 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
 
             await experimentService.activate();
 
             const { properties } = telemetryEvents[1];
-            assert.deepStrictEqual(properties, { optedInto: [], optedOutFrom: [] });
+            assert.deepStrictEqual(properties, { optedInto: '[]', optedOutFrom: '[]' });
         });
 
         test('If the entered value for a setting contains "All", do not expand it to be a list of all experiments, and pass it as-is', async () => {
@@ -526,14 +555,16 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
 
             await experimentService.activate();
 
             const { properties } = telemetryEvents[0];
-            assert.deepStrictEqual(properties, { optedInto: ['All'], optedOutFrom: ['All'] });
+            assert.deepStrictEqual(properties, {
+                optedInto: JSON.stringify(['All']),
+                optedOutFrom: JSON.stringify(['All']),
+            });
         });
 
         // This is an unlikely scenario.
@@ -549,14 +580,13 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
 
             await experimentService.activate();
 
             const { properties } = telemetryEvents[1];
-            assert.deepStrictEqual(properties, { optedInto: [], optedOutFrom: [] });
+            assert.deepStrictEqual(properties, { optedInto: '[]', optedOutFrom: '[]' });
         });
 
         // This is also an unlikely scenario.
@@ -581,14 +611,13 @@ suite('Experimentation service', () => {
             const experimentService = new ExperimentService(
                 instance(workspaceService),
                 instance(appEnvironment),
-                globalMemento,
-                outputChannel,
+                instance(stateFactory),
             );
 
             await experimentService.activate();
 
             const { properties } = telemetryEvents[1];
-            assert.deepStrictEqual(properties, { optedInto: [], optedOutFrom: [] });
+            assert.deepStrictEqual(properties, { optedInto: '[]', optedOutFrom: '[]' });
         });
     });
 });

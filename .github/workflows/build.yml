@@ -9,7 +9,8 @@ on:
       - 'release-*'
 
 env:
-  NODE_VERSION: 12.15.0
+  NODE_VERSION: 20.18.0
+  PYTHON_VERSION: '3.10' # YML treats 3.10 the number as 3.1, so quotes around 3.10
   # Force a path with spaces and to test extension works in these scenarios
   # Unicode characters are causing 2.7 failures so skip that for now.
   special-working-directory: './path with spaces'
@@ -27,6 +28,7 @@ jobs:
       run:
         shell: python
     outputs:
+      vsix_basename: ${{ steps.vsix_names.outputs.vsix_basename }}
       vsix_name: ${{ steps.vsix_names.outputs.vsix_name }}
       vsix_artifact_name: ${{ steps.vsix_names.outputs.vsix_artifact_name }}
     steps:
@@ -39,23 +41,68 @@ jobs:
           else:
             vsix_type = "release"
           print(f"::set-output name=vsix_name::ms-python-{vsix_type}.vsix")
+          print(f"::set-output name=vsix_basename::ms-python-{vsix_type}")
           print(f"::set-output name=vsix_artifact_name::ms-python-{vsix_type}-vsix")
 
   build-vsix:
     name: Create VSIX
     if: github.repository == 'microsoft/vscode-python'
     needs: setup
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            vsix-target: win32-x64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            vsix-target: win32-arm64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            vsix-target: linux-x64
+          #   - os: ubuntu-latest
+          #     target: aarch64-unknown-linux-gnu
+          #     vsix-target: linux-arm64
+          #   - os: ubuntu-latest
+          #     target: arm-unknown-linux-gnueabihf
+          #     vsix-target: linux-armhf
+          #   - os: macos-latest
+          #     target: x86_64-apple-darwin
+          #     vsix-target: darwin-x64
+          #   - os: macos-14
+          #     target: aarch64-apple-darwin
+          #     vsix-target: darwin-arm64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            vsix-target: alpine-x64
+          #   - os: ubuntu-latest
+          #     target: aarch64-unknown-linux-musl
+          #     vsix-target: alpine-arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+
+      - name: Checkout Python Environment Tools
+        uses: actions/checkout@v4
+        with:
+          repository: 'microsoft/python-environment-tools'
+          path: 'python-env-tools'
+          sparse-checkout: |
+            crates
+            Cargo.toml
+            Cargo.lock
+          sparse-checkout-cone-mode: false
 
       - name: Build VSIX
         uses: ./.github/actions/build-vsix
         with:
-          node_version: ${{ env.NODE_VERSION }}
-          vsix_name: ${{ needs.setup.outputs.vsix_name }}
-          artifact_name: ${{ needs.setup.outputs.vsix_artifact_name }}
+          node_version: ${{ env.NODE_VERSION}}
+          vsix_name: ${{ needs.setup.outputs.vsix_basename }}-${{ matrix.vsix-target }}.vsix
+          artifact_name: ${{ needs.setup.outputs.vsix_artifact_name }}-${{ matrix.vsix-target }}
+          cargo_target: ${{ matrix.target }}
+          vsix_target: ${{ matrix.vsix-target }}
 
   lint:
     name: Lint
@@ -63,14 +110,86 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2.3.4
+        uses: actions/checkout@v4
 
       - name: Lint
         uses: ./.github/actions/lint
         with:
           node_version: ${{ env.NODE_VERSION }}
 
-  ### Non-smoke tests
+  check-types:
+    name: Check Python types
+    if: github.repository == 'microsoft/vscode-python'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Use Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install core Python requirements
+        uses: brettcannon/pip-secure-install@v1
+        with:
+          options: '-t ./python_files/lib/python --no-cache-dir --implementation py'
+
+      - name: Install Jedi requirements
+        uses: brettcannon/pip-secure-install@v1
+        with:
+          requirements-file: './python_files/jedilsp_requirements/requirements.txt'
+          options: '-t ./python_files/lib/jedilsp --no-cache-dir --implementation py'
+
+      - name: Install other Python requirements
+        run: |
+          python -m pip install --upgrade -r build/test-requirements.txt
+
+      - name: Run Pyright
+        uses: jakebailey/pyright-action@v2
+        with:
+          version: 1.1.308
+          working-directory: 'python_files'
+
+  python-tests:
+    name: Python Tests
+    # The value of runs-on is the OS of the current job (specified in the strategy matrix below) instead of being hardcoded.
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ${{ env.special-working-directory }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # We're not running CI on macOS for now because it's one less matrix entry to lower the number of runners used,
+        # macOS runners are expensive, and we assume that Ubuntu is enough to cover the Unix case.
+        os: [ubuntu-latest, windows-latest]
+        # Run the tests on the oldest and most recent versions of Python.
+        python: ['3.8', '3.x', '3.13-dev']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.special-working-directory-relative }}
+
+      - name: Use Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install base Python requirements
+        uses: brettcannon/pip-secure-install@v1
+        with:
+          requirements-file: '"${{ env.special-working-directory-relative }}/requirements.txt"'
+          options: '-t "${{ env.special-working-directory-relative }}/python_files/lib/python" --no-cache-dir --implementation py'
+
+      - name: Install test requirements
+        run: python -m pip install --upgrade -r build/test-requirements.txt
+
+      - name: Run Python unit tests
+        run: python python_files/tests/run_all.py
+
   tests:
     name: Tests
     if: github.repository == 'microsoft/vscode-python'
@@ -85,16 +204,27 @@ jobs:
         # entry to lower the number of runners used, macOS runners are expensive,
         # and we assume that Ubuntu is enough to cover the UNIX case.
         os: [ubuntu-latest, windows-latest]
-        python: ['2.7', '3.x']
-        test-suite: [ts-unit, python-unit, venv, single-workspace, multi-workspace, debugger, functional]
+        python: ['3.x']
+        test-suite: [ts-unit, venv, single-workspace, multi-workspace, debugger, functional]
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           path: ${{ env.special-working-directory-relative }}
 
+      - name: Checkout Python Environment Tools
+        uses: actions/checkout@v4
+        with:
+          repository: 'microsoft/python-environment-tools'
+          path: ${{ env.special-working-directory-relative }}/python-env-tools
+          sparse-checkout: |
+            crates
+            Cargo.toml
+            Cargo.lock
+          sparse-checkout-cone-mode: false
+
       - name: Install Node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -106,37 +236,33 @@ jobs:
       - name: Compile
         run: npx gulp prePublishNonBundle
 
+      - name: Localization
+        run: npx @vscode/l10n-dev@latest export ./src
+
       - name: Install Python ${{ matrix.python }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Install Python requirements
-        run: |
-          python -m pip --disable-pip-version-check install -t ./pythonFiles/lib/python --no-cache-dir --implementation py --no-deps --upgrade -r requirements.txt
-          # We need to have debugpy so that tests relying on it keep passing, but we don't need install_debugpy's logic in the test phase.
-          python -m pip --disable-pip-version-check install -t ./pythonFiles/lib/python --no-cache-dir --implementation py --no-deps --upgrade --pre debugpy
+      - name: Upgrade Pip
+        run: python -m pip install -U pip
 
-      - name: Install Jedi LSP requirements
-        run: python -m pip --disable-pip-version-check install -t ./pythonFiles/lib/jedilsp --no-cache-dir --implementation py --no-deps --upgrade -r ./jedils_requirements.txt
-        if: startsWith(matrix.python, 3.)
+      # For faster/better builds of sdists.
+      - name: Install build pre-requisite
+        run: python -m pip install wheel nox
+
+      - name: Install Python Extension dependencies (jedi, etc.)
+        run: nox --session install_python_libs
 
       - name: Install test requirements
         run: python -m pip install --upgrade -r build/test-requirements.txt
 
-      - name: Install debugpy wheels
-        run: |
-          python -m pip install wheel
-          python -m pip --disable-pip-version-check install -r build/debugger-install-requirements.txt
-          python ./pythonFiles/install_debugpy.py
-        shell: bash
-        if: matrix.test-suite == 'debugger' && matrix.python != 2.7
+      - name: Rust Tool Chain setup
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install debugpy wheel (Python 2.7)
-        run: |
-          python -m pip --disable-pip-version-check install -t ./pythonFiles/lib/python --no-cache-dir --implementation py --no-deps --upgrade --pre debugpy
+      - name: Build Native Binaries
+        run: nox --session native_build
         shell: bash
-        if: matrix.test-suite == 'debugger' && matrix.python == 2.7
 
       - name: Install functional test requirements
         run: python -m pip install --upgrade -r ./build/functional-test-requirements.txt
@@ -198,7 +324,7 @@ jobs:
         shell: pwsh
         if: matrix.test-suite == 'venv'
         run: |
-          # 1. For `terminalActivation.testvirtualenvs.test.ts`
+          # 1. For `*.testvirtualenvs.test.ts`
           if ('${{ matrix.os }}' -match 'windows-latest') {
             $condaPythonPath = Join-Path -Path $Env:CONDA -ChildPath python.exe
             $condaExecPath = Join-Path -Path $Env:CONDA -ChildPath Scripts | Join-Path -ChildPath conda
@@ -209,12 +335,6 @@ jobs:
           & $condaPythonPath ./build/ci/addEnvPath.py ${{ env.PYTHON_VIRTUAL_ENVS_LOCATION }} condaExecPath $condaExecPath
           & $condaPythonPath ./build/ci/addEnvPath.py ${{ env.PYTHON_VIRTUAL_ENVS_LOCATION }} condaPath
           & $condaExecPath init --all
-
-          # 2. For `interpreterLocatorService.testvirtualenvs.ts`
-
-          & $condaExecPath create -n "test_env1" -y python
-          & $condaExecPath create -p "./test_env2" -y python
-          & $condaExecPath create -p "~/test_env3" -y python
 
       - name: Set CI_PYTHON_PATH and CI_DISABLE_AUTO_SELECTION
         run: |
@@ -228,10 +348,6 @@ jobs:
         run: npm run test:unittests
         if: matrix.test-suite == 'ts-unit' && startsWith(matrix.python, '3.')
 
-      - name: Run Python unit tests
-        run: python pythonFiles/tests/run_all.py
-        if: matrix.test-suite == 'python-unit'
-
       # The virtual environment based tests use the `testSingleWorkspace` set of tests
       # with the environment variable `TEST_FILES_SUFFIX` set to `testvirtualenvs`,
       # which is set in the "Prepare environment for venv tests" step.
@@ -242,7 +358,7 @@ jobs:
         env:
           TEST_FILES_SUFFIX: testvirtualenvs
           CI_PYTHON_VERSION: ${{ matrix.python }}
-        uses: GabrielBB/xvfb-action@v1.5
+        uses: GabrielBB/xvfb-action@v1.7
         with:
           run: npm run testSingleWorkspace
           working-directory: ${{ env.special-working-directory }}
@@ -251,7 +367,7 @@ jobs:
       - name: Run single-workspace tests
         env:
           CI_PYTHON_VERSION: ${{ matrix.python }}
-        uses: GabrielBB/xvfb-action@v1.5
+        uses: GabrielBB/xvfb-action@v1.7
         with:
           run: npm run testSingleWorkspace
           working-directory: ${{ env.special-working-directory }}
@@ -260,7 +376,7 @@ jobs:
       - name: Run multi-workspace tests
         env:
           CI_PYTHON_VERSION: ${{ matrix.python }}
-        uses: GabrielBB/xvfb-action@v1.5
+        uses: GabrielBB/xvfb-action@v1.7
         with:
           run: npm run testMultiWorkspace
           working-directory: ${{ env.special-working-directory }}
@@ -269,7 +385,7 @@ jobs:
       - name: Run debugger tests
         env:
           CI_PYTHON_VERSION: ${{ matrix.python }}
-        uses: GabrielBB/xvfb-action@v1.5
+        uses: GabrielBB/xvfb-action@v1.7
         with:
           run: npm run testDebugger
           working-directory: ${{ env.special-working-directory }}
@@ -290,99 +406,29 @@ jobs:
       matrix:
         # We're not running CI on macOS for now because it's one less matrix entry to lower the number of runners used,
         # macOS runners are expensive, and we assume that Ubuntu is enough to cover the UNIX case.
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: windows-latest
+            vsix-target: win32-x64
+          - os: ubuntu-latest
+            vsix-target: linux-x64
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v2.3.4
+        uses: actions/checkout@v4
+
+      - name: Checkout Python Environment Tools
+        uses: actions/checkout@v4
+        with:
+          repository: 'microsoft/python-environment-tools'
+          path: ${{ env.special-working-directory-relative }}/python-env-tools
+          sparse-checkout: |
+            crates
+            Cargo.toml
+            Cargo.lock
+          sparse-checkout-cone-mode: false
 
       - name: Smoke tests
         uses: ./.github/actions/smoke-tests
         with:
           node_version: ${{ env.NODE_VERSION }}
-          artifact_name: ${{ needs.setup.outputs.vsix_artifact_name }}
-
-  #   insider-tests:
-  #     name: Insider tests
-  #     if: github.repository == 'microsoft/vscode-python'
-  #     runs-on: ${{ matrix.os }}
-  #     strategy:
-  #       fail-fast: false
-  #       matrix:
-  #         # We're not running CI on macOS for now because it's one less matrix entry to lower the number of runners used,
-  #         # macOS runners are expensive, and we assume that Ubuntu is enough to cover the UNIX case.
-  #         os: [ubuntu-latest]
-  #         python: [3.8] # For Jupyter.
-  #     steps:
-  #       - name: Checkout
-  #         uses: actions/checkout@v2
-
-  #       - name: Install Node
-  #         uses: actions/setup-node@v2
-  #         with:
-  #           node-version: ${{ env.NODE_VERSION }}
-  #           cache: 'npm'
-
-  #       - name: Use Python ${{ matrix.python }}
-  #         uses: actions/setup-python@v2
-  #         with:
-  #           python-version: ${{ matrix.python }}
-
-  #       - name: Install dependencies (npm ci)
-  #         run: npm ci --prefer-offline
-
-  #       - name: pip install system test requirements
-  #         run: |
-  #           python -m pip install --upgrade -r build/test-requirements.txt
-  #           python -m pip --disable-pip-version-check install -t ./pythonFiles/lib/python --no-cache-dir --implementation py --no-deps --upgrade -r requirements.txt
-  #           python -m pip --disable-pip-version-check install -t ./pythonFiles/lib/python --no-cache-dir --implementation py --no-deps --upgrade --pre debugpy
-  #         shell: bash
-
-  #       - name: pip install smoke test requirements
-  #         run: |
-  #           python -m pip install --upgrade -r build/smoke-test-requirements.txt
-  #         shell: bash
-
-  #       # Compile the test files.
-  #       - name: Prepare for insiders tests
-  #         run: npm run prePublish
-  #         shell: bash
-
-  #       - name: Set CI_PYTHON_PATH and CI_DISABLE_AUTO_SELECTION
-  #         run: |
-  #           echo "CI_PYTHON_PATH=python" >> $GITHUB_ENV
-  #           echo "CI_DISABLE_AUTO_SELECTION=1" >> $GITHUB_ENV
-  #         shell: bash
-
-  #       - name: Run insider tests
-  #         env:
-  #           DISPLAY: 10
-  #           INSTALL_JUPYTER_EXTENSION: true
-  #           INSTALL_PYLANCE_EXTENSION: true
-  #           VSC_PYTHON_CI_TEST_VSC_CHANNEL: insiders
-  #           TEST_FILES_SUFFIX: insiders.test
-  #           CODE_TESTS_WORKSPACE: ./src/testMultiRootWkspc/smokeTests
-  #         uses: GabrielBB/xvfb-action@v1.5
-  #         with:
-  #           run: node --no-force-async-hooks-checks ./out/test/standardTest.js
-
-  upload:
-    name: Upload VSIX to Azure Blob Storage
-    if: github.repository == 'microsoft/vscode-python' && github.ref == 'refs/heads/main'
-    needs: [setup, tests, smoke-tests, build-vsix]
-    runs-on: ubuntu-latest
-    env:
-      BLOB_CONTAINER_NAME: extension-builds
-      BLOB_NAME: ms-python-insiders.vsix
-    steps:
-      - name: Download VSIX
-        uses: actions/download-artifact@v2
-        with:
-          name: ${{ needs.setup.outputs.vsix_artifact_name }}
-      - name: Azure Login
-        uses: azure/login@v1.3.0
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - name: Upload to Blob Storage
-        run: az storage blob upload --file ${{ needs.setup.outputs.vsix_name }} --account-name pvsc --container-name ${{ env.BLOB_CONTAINER_NAME }} --name ${{ env.BLOB_NAME }} --auth-mode login
-      - name: Get URL to uploaded VSIX
-        run: az storage blob url --account-name pvsc --container-name ${{ env.BLOB_CONTAINER_NAME }} --name ${{ env.BLOB_NAME }} --auth-mode login
+          artifact_name: ${{ needs.setup.outputs.vsix_artifact_name }}-${{ matrix.vsix-target }}

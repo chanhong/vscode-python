@@ -16,6 +16,7 @@ import {
     DebugConsole,
     DebugSession,
     DebugSessionCustomEvent,
+    DebugSessionOptions,
     DecorationRenderOptions,
     Disposable,
     DocumentSelector,
@@ -24,10 +25,11 @@ import {
     GlobPattern,
     InputBox,
     InputBoxOptions,
+    LanguageStatusItem,
+    LogOutputChannel,
     MessageItem,
     MessageOptions,
     OpenDialogOptions,
-    OutputChannel,
     Progress,
     ProgressOptions,
     QuickPick,
@@ -38,6 +40,8 @@ import {
     StatusBarItem,
     Terminal,
     TerminalOptions,
+    TerminalShellExecutionEndEvent,
+    TerminalShellIntegrationChangeEvent,
     TextDocument,
     TextDocumentChangeEvent,
     TextDocumentShowOptions,
@@ -59,20 +63,71 @@ import {
     WorkspaceFolderPickOptions,
     WorkspaceFoldersChangeEvent,
 } from 'vscode';
-import type { NotebookConcatTextDocument, NotebookDocument } from 'vscode-proposed';
 
 import { Channel } from '../constants';
 import { Resource } from '../types';
 import { ICommandNameArgumentTypeMapping } from './commands';
 import { ExtensionContextKey } from './contextKeys';
 
+export interface TerminalDataWriteEvent {
+    /**
+     * The {@link Terminal} for which the data was written.
+     */
+    readonly terminal: Terminal;
+    /**
+     * The data being written.
+     */
+    readonly data: string;
+}
+
+export interface TerminalExecutedCommand {
+    /**
+     * The {@link Terminal} the command was executed in.
+     */
+    terminal: Terminal;
+    /**
+     * The full command line that was executed, including both the command and the arguments.
+     */
+    commandLine: string | undefined;
+    /**
+     * The current working directory that was reported by the shell. This will be a {@link Uri}
+     * if the string reported by the shell can reliably be mapped to the connected machine.
+     */
+    cwd: Uri | string | undefined;
+    /**
+     * The exit code reported by the shell.
+     */
+    exitCode: number | undefined;
+    /**
+     * The output of the command when it has finished executing. This is the plain text shown in
+     * the terminal buffer and does not include raw escape sequences. Depending on the shell
+     * setup, this may include the command line as part of the output.
+     */
+    output: string | undefined;
+}
+
 export const IApplicationShell = Symbol('IApplicationShell');
 export interface IApplicationShell {
+    /**
+     * An event that is emitted when a terminal with shell integration activated has completed
+     * executing a command.
+     *
+     * Note that this event will not fire if the executed command exits the shell, listen to
+     * {@link onDidCloseTerminal} to handle that case.
+     */
+    readonly onDidExecuteTerminalCommand: Event<TerminalExecutedCommand> | undefined;
     /**
      * An [event](#Event) which fires when the focus state of the current window
      * changes. The value of the event represents whether the window is focused.
      */
     readonly onDidChangeWindowState: Event<WindowState>;
+
+    /**
+     * An event which fires when the terminal's child pseudo-device is written to (the shell).
+     * In other words, this provides access to the raw data stream from the process running
+     * within the terminal, including VT sequences.
+     */
+    readonly onDidWriteTerminalData: Event<TerminalDataWriteEvent>;
 
     showInformationMessage(message: string, ...items: string[]): Thenable<string | undefined>;
 
@@ -274,6 +329,19 @@ export interface IApplicationShell {
     showInputBox(options?: InputBoxOptions, token?: CancellationToken): Thenable<string | undefined>;
 
     /**
+     * Show the given document in a text editor. A {@link ViewColumn column} can be provided
+     * to control where the editor is being shown. Might change the {@link window.activeTextEditor active editor}.
+     *
+     * @param document A text document to be shown.
+     * @param column A view column in which the {@link TextEditor editor} should be shown. The default is the {@link ViewColumn.Active active}, other values
+     * are adjusted to be `Min(column, columnCount + 1)`, the {@link ViewColumn.Active active}-column is not adjusted. Use {@linkcode ViewColumn.Beside}
+     * to open the editor to the side of the currently active one.
+     * @param preserveFocus When `true` the editor will not take focus.
+     * @return A promise that resolves to an {@link TextEditor editor}.
+     */
+    showTextDocument(document: TextDocument, column?: ViewColumn, preserveFocus?: boolean): Thenable<TextEditor>;
+
+    /**
      * Creates a [QuickPick](#QuickPick) to let the user pick an item from a list
      * of items of type T.
      *
@@ -342,7 +410,7 @@ export interface IApplicationShell {
      * @param priority The priority of the item. Higher values mean the item should be shown more to the left.
      * @return A new status bar item.
      */
-    createStatusBarItem(alignment?: StatusBarAlignment, priority?: number): StatusBarItem;
+    createStatusBarItem(alignment?: StatusBarAlignment, priority?: number, id?: string): StatusBarItem;
     /**
      * Shows a selection list of [workspace folders](#workspace.workspaceFolders) to pick from.
      * Returns `undefined` if no folder is open.
@@ -416,7 +484,8 @@ export interface IApplicationShell {
      *
      * @param name Human-readable string which will be used to represent the channel in the UI.
      */
-    createOutputChannel(name: string): OutputChannel;
+    createOutputChannel(name: string): LogOutputChannel;
+    createLanguageStatusItem(id: string, selector: DocumentSelector): LanguageStatusItem;
 }
 
 export const ICommandManager = Symbol('ICommandManager');
@@ -522,7 +591,7 @@ export interface IDocumentManager {
     /**
      * The currently visible editors or an empty array.
      */
-    readonly visibleTextEditors: TextEditor[];
+    readonly visibleTextEditors: readonly TextEditor[];
 
     /**
      * An [event](#Event) which fires when the [active editor](#window.activeTextEditor)
@@ -542,7 +611,7 @@ export interface IDocumentManager {
      * An [event](#Event) which fires when the array of [visible editors](#window.visibleTextEditors)
      * has changed.
      */
-    readonly onDidChangeVisibleTextEditors: Event<TextEditor[]>;
+    readonly onDidChangeVisibleTextEditors: Event<readonly TextEditor[]>;
 
     /**
      * An [event](#Event) which fires when the selection in an editor has changed.
@@ -676,6 +745,16 @@ export interface IWorkspaceService {
     readonly rootPath: string | undefined;
 
     /**
+     * When true, the user has explicitly trusted the contents of the workspace.
+     */
+    readonly isTrusted: boolean;
+
+    /**
+     * Event that fires when the current workspace has been trusted.
+     */
+    readonly onDidGrantWorkspaceTrust: Event<void>;
+
+    /**
      * List of workspace folders or `undefined` when no folder is open.
      * *Note* that the first entry corresponds to the value of `rootPath`.
      *
@@ -724,12 +803,9 @@ export interface IWorkspaceService {
      */
     readonly onDidChangeConfiguration: Event<ConfigurationChangeEvent>;
     /**
-     * Whether a workspace folder exists
-     * @type {boolean}
-     * @memberof IWorkspaceService
+     * Returns if we're running in a virtual workspace.
      */
-    readonly hasWorkspaceFolders: boolean;
-
+    readonly isVirtualWorkspace: boolean;
     /**
      * Returns the [workspace folder](#WorkspaceFolder) that contains a given uri.
      * * returns `undefined` when the given uri doesn't match any workspace folder
@@ -742,9 +818,6 @@ export interface IWorkspaceService {
 
     /**
      * Generate a key that's unique to the workspace folder (could be fsPath).
-     * @param {(Uri | undefined)} resource
-     * @returns {string}
-     * @memberof IWorkspaceService
      */
     getWorkspaceFolderIdentifier(resource: Uri | undefined, defaultValue?: string): string;
     /**
@@ -816,9 +889,30 @@ export interface IWorkspaceService {
      *
      * @param section A dot-separated identifier.
      * @param resource A resource for which the configuration is asked for
+     * @param languageSpecific Should the [python] language-specific settings be obtained?
      * @return The full configuration or a subset.
      */
-    getConfiguration(section?: string, resource?: Uri): WorkspaceConfiguration;
+    getConfiguration(section?: string, resource?: Uri, languageSpecific?: boolean): WorkspaceConfiguration;
+
+    /**
+     * Opens an untitled text document. The editor will prompt the user for a file
+     * path when the document is to be saved. The `options` parameter allows to
+     * specify the *language* and/or the *content* of the document.
+     *
+     * @param options Options to control how the document will be created.
+     * @return A promise that resolves to a {@link TextDocument document}.
+     */
+    openTextDocument(options?: { language?: string; content?: string }): Thenable<TextDocument>;
+    /**
+     * Saves the editor identified by the given resource and returns the resulting resource or `undefined`
+     * if save was not successful.
+     *
+     * **Note** that an editor with the provided resource must be opened in order to be saved.
+     *
+     * @param uri the associated uri for the opened editor to save.
+     * @return A thenable that resolves when the save operation has finished.
+     */
+    save(uri: Uri): Thenable<Uri | undefined>;
 }
 
 export const ITerminalManager = Symbol('ITerminalManager');
@@ -841,6 +935,10 @@ export interface ITerminalManager {
      * @return A new Terminal.
      */
     createTerminal(options: TerminalOptions): Terminal;
+
+    onDidChangeTerminalShellIntegration(handler: (e: TerminalShellIntegrationChangeEvent) => void): Disposable;
+
+    onDidEndTerminalShellExecution(handler: (e: TerminalShellExecutionEndEvent) => void): Disposable;
 }
 
 export const IDebugService = Symbol('IDebugManager');
@@ -861,7 +959,7 @@ export interface IDebugService {
     /**
      * List of breakpoints.
      */
-    readonly breakpoints: Breakpoint[];
+    readonly breakpoints: readonly Breakpoint[];
 
     /**
      * An [event](#Event) which fires when the [active debug session](#debug.activeDebugSession)
@@ -933,7 +1031,7 @@ export interface IDebugService {
     startDebugging(
         folder: WorkspaceFolder | undefined,
         nameOrConfiguration: string | DebugConfiguration,
-        parentSession?: DebugSession,
+        parentSession?: DebugSession | DebugSessionOptions,
     ): Thenable<boolean>;
 
     /**
@@ -1017,6 +1115,10 @@ export interface IApplicationEnvironment {
      */
     readonly shell: string;
     /**
+     * An {@link Event} which fires when the default shell changes.
+     */
+    readonly onDidChangeShell: Event<string>;
+    /**
      * Gets the vscode channel (whether 'insiders' or 'stable').
      */
     readonly channel: Channel;
@@ -1041,6 +1143,16 @@ export interface IApplicationEnvironment {
      * from a desktop application or a web browser.
      */
     readonly uiKind: UIKind;
+    /**
+     * The name of a remote. Defined by extensions, popular samples are `wsl` for the Windows
+     * Subsystem for Linux or `ssh-remote` for remotes using a secure shell.
+     *
+     * *Note* that the value is `undefined` when there is no remote extension host but that the
+     * value is defined in all extension hosts (local and remote) in case a remote extension host
+     * exists. Use {@link Extension.extensionKind} to know if
+     * a specific extension runs remote or not.
+     */
+    readonly remoteName: string | undefined;
 }
 
 export const ILanguageService = Symbol('ILanguageService');
@@ -1085,11 +1197,4 @@ export interface IClipboard {
      * Writes text into the clipboard.
      */
     writeText(value: string): Promise<void>;
-}
-export const IVSCodeNotebook = Symbol('IVSCodeNotebook');
-export interface IVSCodeNotebook {
-    readonly notebookDocuments: ReadonlyArray<NotebookDocument>;
-    readonly onDidOpenNotebookDocument: Event<NotebookDocument>;
-    readonly onDidCloseNotebookDocument: Event<NotebookDocument>;
-    createConcatTextDocument(notebook: NotebookDocument, selector?: DocumentSelector): NotebookConcatTextDocument;
 }

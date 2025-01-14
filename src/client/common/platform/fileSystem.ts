@@ -10,8 +10,8 @@ import * as glob from 'glob';
 import { injectable } from 'inversify';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
+import { traceError } from '../../logging';
 import '../extensions';
-import { traceError } from '../logger';
 import { convertFileType } from '../utils/filesystem';
 import { createDirNotEmptyError, isFileExistsError, isFileNotFoundError, isNoPermissionsError } from './errors';
 import { FileSystemPaths, FileSystemPathUtils } from './fs-paths';
@@ -122,7 +122,7 @@ export class RawFileSystem implements IRawFileSystem {
             // The "fs-extra" module is effectively equivalent to node's "fs"
             // module (but is a bit more async-friendly).  So we use that
             // instead of "fs".
-            fsExtra || fs,
+            fsExtra || (fs as IRawFSExtra),
         );
     }
 
@@ -333,7 +333,7 @@ export class FileSystemUtils implements IFileSystemUtils {
             pathUtils.paths,
             tmp || TemporaryFileSystem.withDefaults(),
             getHash || getHashString,
-            globFiles || promisify(glob),
+            globFiles || promisify(glob.default),
         );
     }
 
@@ -471,8 +471,6 @@ export class FileSystemUtils implements IFileSystemUtils {
     }
 }
 
-// We *could* use ICryptoUtils, but it's a bit overkill, issue tracked
-// in https://github.com/microsoft/vscode-python/issues/8438.
 export function getHashString(data: string): string {
     const hash = createHash('sha512');
     hash.update(data);

@@ -1,18 +1,14 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import * as path from 'path';
-import { traceError } from '../../../../common/logger';
 import { PythonEnvKind } from '../../info';
 import { BasicEnvInfo, IPythonEnvsIterator } from '../../locator';
 import { FSWatchingLocator } from './fsWatchingLocator';
 import { getInterpreterPathFromDir } from '../../../common/commonUtils';
 import { getSubDirs } from '../../../common/externalDependencies';
-import { getPyenvDir } from '../../../common/environmentManagers/pyenv';
-
-function getPyenvVersionsDir(): string {
-    return path.join(getPyenvDir(), 'versions');
-}
+import { getPyenvVersionsDir } from '../../../common/environmentManagers/pyenv';
+import { traceError, traceInfo } from '../../../../logging';
+import { StopWatch } from '../../../../common/utils/stopWatch';
 
 /**
  * Gets all the pyenv environments.
@@ -21,26 +17,36 @@ function getPyenvVersionsDir(): string {
  * all the environments (global or virtual) in that directory.
  */
 async function* getPyenvEnvironments(): AsyncIterableIterator<BasicEnvInfo> {
-    const pyenvVersionDir = getPyenvVersionsDir();
+    const stopWatch = new StopWatch();
+    traceInfo('Searching for pyenv environments');
+    try {
+        const pyenvVersionDir = getPyenvVersionsDir();
 
-    const subDirs = getSubDirs(pyenvVersionDir, { resolveSymlinks: true });
-    for await (const subDirPath of subDirs) {
-        const interpreterPath = await getInterpreterPathFromDir(subDirPath);
+        const subDirs = getSubDirs(pyenvVersionDir, { resolveSymlinks: true });
+        for await (const subDirPath of subDirs) {
+            const interpreterPath = await getInterpreterPathFromDir(subDirPath);
 
-        if (interpreterPath) {
-            try {
-                yield {
-                    kind: PythonEnvKind.Pyenv,
-                    executablePath: interpreterPath,
-                };
-            } catch (ex) {
-                traceError(`Failed to process environment: ${interpreterPath}`, ex);
+            if (interpreterPath) {
+                try {
+                    yield {
+                        kind: PythonEnvKind.Pyenv,
+                        executablePath: interpreterPath,
+                    };
+                } catch (ex) {
+                    traceError(`Failed to process environment: ${interpreterPath}`, ex);
+                }
             }
         }
+    } catch (ex) {
+        // This is expected when pyenv is not installed
+        traceInfo(`pyenv is not installed`);
     }
+    traceInfo(`Finished searching for pyenv environments: ${stopWatch.elapsedTime} milliseconds`);
 }
 
-export class PyenvLocator extends FSWatchingLocator<BasicEnvInfo> {
+export class PyenvLocator extends FSWatchingLocator {
+    public readonly providerId: string = 'pyenv';
+
     constructor() {
         super(getPyenvVersionsDir, async () => PythonEnvKind.Pyenv);
     }

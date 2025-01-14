@@ -3,48 +3,23 @@
 
 'use strict';
 
-import { SemVer } from 'semver';
-import {
-    CodeLensProvider,
-    CompletionItemProvider,
-    DefinitionProvider,
-    DocumentSymbolProvider,
-    Event,
-    HoverProvider,
-    ReferenceProvider,
-    RenameProvider,
-    SignatureHelpProvider,
-} from 'vscode';
+import { Event } from 'vscode';
 import { LanguageClient, LanguageClientOptions } from 'vscode-languageclient/node';
-import * as lsp from 'vscode-languageserver-protocol';
-import type { NugetPackage } from '../common/nuget/types';
-import type { IDisposable, IOutputChannel, LanguageServerDownloadChannels, Resource } from '../common/types';
+import type { IDisposable, ILogOutputChannel, Resource } from '../common/types';
+import { StopWatch } from '../common/utils/stopWatch';
 import { PythonEnvironment } from '../pythonEnvironments/info';
 
 export const IExtensionActivationManager = Symbol('IExtensionActivationManager');
 /**
  * Responsible for activation of extension.
- *
- * @export
- * @interface IExtensionActivationManager
- * @extends {IDisposable}
  */
 export interface IExtensionActivationManager extends IDisposable {
-    /**
-     * Method invoked when extension activates (invoked once).
-     *
-     * @returns {Promise<void>}
-     * @memberof IExtensionActivationManager
-     */
-    activate(): Promise<void>;
+    // Method invoked when extension activates (invoked once).
+    activate(startupStopWatch: StopWatch): Promise<void>;
     /**
      * Method invoked when a workspace is loaded.
      * This is where we place initialization scripts for each workspace.
      * (e.g. if we need to run code for each workspace, then this is where that happens).
-     *
-     * @param {Resource} resource
-     * @returns {Promise<void>}
-     * @memberof IExtensionActivationManager
      */
     activateWorkspace(resource: Resource): Promise<void>;
 }
@@ -55,11 +30,10 @@ export const IExtensionActivationService = Symbol('IExtensionActivationService')
  * invoked for every workspace folder (in multi-root workspace folders) during the activation of the extension.
  * This is a great hook for extension activation code, i.e. you don't need to modify
  * the `extension.ts` file to invoke some code when extension gets activated.
- * @export
- * @interface IExtensionActivationService
  */
 export interface IExtensionActivationService {
-    activate(resource: Resource): Promise<void>;
+    supportedWorkspaceTypes: { untrustedWorkspace: boolean; virtualWorkspace: boolean };
+    activate(resource: Resource, startupStopWatch?: StopWatch): Promise<void>;
 }
 
 export enum LanguageServerType {
@@ -70,78 +44,11 @@ export enum LanguageServerType {
     None = 'None',
 }
 
-export const DotNetLanguageServerFolder = 'languageServer';
-
-interface LanguageServerCommandHandler {
-    clearAnalysisCache(): void;
-}
-
-/**
- * This interface is a subset of the vscode-protocol connection interface.
- * It's the minimum set of functions needed in order to talk to a language server.
- */
-export type ILanguageServerConnection = Pick<
-    lsp.ProtocolConnection,
-    'sendRequest' | 'sendNotification' | 'onProgress' | 'sendProgress' | 'onNotification' | 'onRequest'
->;
-
-interface ILanguageServer
-    extends RenameProvider,
-        DefinitionProvider,
-        HoverProvider,
-        ReferenceProvider,
-        CompletionItemProvider,
-        CodeLensProvider,
-        DocumentSymbolProvider,
-        SignatureHelpProvider,
-        Partial<LanguageServerCommandHandler>,
-        IDisposable {
-    readonly connection?: ILanguageServerConnection;
-    readonly capabilities?: lsp.ServerCapabilities;
-}
-
 export const ILanguageServerActivator = Symbol('ILanguageServerActivator');
-export interface ILanguageServerActivator extends ILanguageServer {
+export interface ILanguageServerActivator {
     start(resource: Resource, interpreter: PythonEnvironment | undefined): Promise<void>;
     activate(): void;
     deactivate(): void;
-}
-
-export const ILanguageServerCache = Symbol('ILanguageServerCache');
-export interface ILanguageServerCache {
-    get(resource: Resource, interpreter?: PythonEnvironment): Promise<ILanguageServer>;
-}
-
-export type FolderVersionPair = { path: string; version: SemVer };
-export const ILanguageServerFolderService = Symbol('ILanguageServerFolderService');
-
-export interface ILanguageServerFolderService {
-    getLanguageServerFolderName(resource: Resource): Promise<string>;
-    getLatestLanguageServerVersion(resource: Resource): Promise<NugetPackage | undefined>;
-    getCurrentLanguageServerDirectory(): Promise<FolderVersionPair | undefined>;
-    skipDownload(): Promise<boolean>;
-}
-
-export const ILanguageServerDownloader = Symbol('ILanguageServerDownloader');
-
-export interface ILanguageServerDownloader {
-    downloadLanguageServer(destinationFolder: string, resource: Resource): Promise<void>;
-}
-
-export const ILanguageServerPackageService = Symbol('ILanguageServerPackageService');
-export interface ILanguageServerPackageService {
-    getNugetPackageName(): string;
-    getLatestNugetPackageVersion(resource: Resource, minVersion?: string): Promise<NugetPackage>;
-    getLanguageServerDownloadChannel(): LanguageServerDownloadChannels;
-}
-
-export const IDownloadChannelRule = Symbol('IDownloadChannelRule');
-export interface IDownloadChannelRule {
-    shouldLookForNewLanguageServer(currentFolder?: FolderVersionPair): Promise<boolean>;
-}
-export const ILanguageServerCompatibilityService = Symbol('ILanguageServerCompatibilityService');
-export interface ILanguageServerCompatibilityService {
-    isSupported(): Promise<boolean>;
 }
 
 export const ILanguageClientFactory = Symbol('ILanguageClientFactory');
@@ -161,60 +68,33 @@ export interface ILanguageServerAnalysisOptions extends IDisposable {
 }
 export const ILanguageServerManager = Symbol('ILanguageServerManager');
 export interface ILanguageServerManager extends IDisposable {
-    readonly languageProxy: ILanguageServerProxy | undefined;
     start(resource: Resource, interpreter: PythonEnvironment | undefined): Promise<void>;
     connect(): void;
     disconnect(): void;
 }
-export const ILanguageServerExtension = Symbol('ILanguageServerExtension');
-export interface ILanguageServerExtension extends IDisposable {
-    readonly invoked: Event<void>;
-    loadExtensionArgs?: unknown;
-    register(): void;
-}
+
 export const ILanguageServerProxy = Symbol('ILanguageServerProxy');
 export interface ILanguageServerProxy extends IDisposable {
-    /**
-     * LanguageClient in use
-     */
-    languageClient: LanguageClient | undefined;
     start(
         resource: Resource,
         interpreter: PythonEnvironment | undefined,
         options: LanguageClientOptions,
     ): Promise<void>;
+    stop(): Promise<void>;
     /**
      * Sends a request to LS so as to load other extensions.
      * This is used as a plugin loader mechanism.
      * Anyone (such as intellicode) wanting to interact with LS, needs to send this request to LS.
-     * @param {{}} [args]
-     * @memberof ILanguageServerProxy
      */
     loadExtension(args?: unknown): void;
-}
-
-export enum PlatformName {
-    Windows32Bit = 'win-x86',
-    Windows64Bit = 'win-x64',
-    Mac64Bit = 'osx-x64',
-    Linux64Bit = 'linux-x64',
-}
-export const IPlatformData = Symbol('IPlatformData');
-export interface IPlatformData {
-    readonly platformName: PlatformName;
-    readonly engineDllName: string;
-    readonly engineExecutableName: string;
 }
 
 export const ILanguageServerOutputChannel = Symbol('ILanguageServerOutputChannel');
 export interface ILanguageServerOutputChannel {
     /**
      * Creates output channel if necessary and returns it
-     *
-     * @type {IOutputChannel}
-     * @memberof ILanguageServerOutputChannel
      */
-    readonly channel: IOutputChannel;
+    readonly channel: ILogOutputChannel;
 }
 
 export const IExtensionSingleActivationService = Symbol('IExtensionSingleActivationService');
@@ -223,14 +103,8 @@ export const IExtensionSingleActivationService = Symbol('IExtensionSingleActivat
  * invoked during the activation of the extension.
  * This is a great hook for extension activation code, i.e. you don't need to modify
  * the `extension.ts` file to invoke some code when extension gets activated.
- * @export
- * @interface IExtensionSingleActivationService
  */
 export interface IExtensionSingleActivationService {
+    supportedWorkspaceTypes: { untrustedWorkspace: boolean; virtualWorkspace: boolean };
     activate(): Promise<void>;
-}
-
-export const IMPLSDeprecationPrompt = Symbol('IMPLSDeprecationPrompt');
-export interface IMPLSDeprecationPrompt {
-    showPrompt(): Promise<void>;
 }

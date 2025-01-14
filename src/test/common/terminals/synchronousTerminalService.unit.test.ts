@@ -66,7 +66,7 @@ suite('Terminal Service (synchronous)', () => {
         });
     });
     suite('sendCommand', () => {
-        const shellExecFile = path.join(EXTENSION_ROOT_DIR, 'pythonFiles', 'shell_exec.py');
+        const shellExecFile = path.join(EXTENSION_ROOT_DIR, 'python_files', 'shell_exec.py');
 
         test('run sendCommand in terminalService if there is no cancellation token', async () => {
             when(terminalService.sendCommand('cmd', deepEqual(['1', '2']))).thenResolve();
@@ -105,7 +105,7 @@ suite('Terminal Service (synchronous)', () => {
             verify(
                 terminalService.sendCommand(
                     'python',
-                    deepEqual([shellExecFile, 'cmd', '1', '2', tmpFile.filePath.fileToCommandArgument()]),
+                    deepEqual([shellExecFile, 'cmd', '1', '2', tmpFile.filePath.fileToCommandArgumentForPythonExt()]),
                 ),
             ).once();
         }).timeout(1_000);
@@ -141,7 +141,7 @@ suite('Terminal Service (synchronous)', () => {
             verify(
                 terminalService.sendCommand(
                     'python',
-                    deepEqual([shellExecFile, 'cmd', '1', '2', tmpFile.filePath.fileToCommandArgument()]),
+                    deepEqual([shellExecFile, 'cmd', '1', '2', tmpFile.filePath.fileToCommandArgumentForPythonExt()]),
                 ),
             ).once();
         }).timeout(2_000);

@@ -27,6 +27,7 @@ export const IDiagnosticsService = Symbol('IDiagnosticsService');
 
 export interface IDiagnosticsService {
     readonly runInBackground: boolean;
+    readonly runInUntrustedWorkspace: boolean;
     diagnose(resource: Resource): Promise<IDiagnostic[]>;
     canHandle(diagnostic: IDiagnostic): Promise<boolean>;
     handle(diagnostics: IDiagnostic[]): Promise<void>;
@@ -52,13 +53,14 @@ export interface IDiagnosticCommand {
 
 export type IDiagnosticMessageOnCloseHandler = (response?: string) => void;
 
+export const IInvalidPythonPathInSettings = Symbol('IInvalidPythonPathInSettings');
+
+export interface IInvalidPythonPathInSettings extends IDiagnosticsService {
+    validateInterpreterPathInSettings(resource: Resource): Promise<boolean>;
+}
+
 export const IInvalidPythonPathInDebuggerService = Symbol('IInvalidPythonPathInDebuggerService');
 
 export interface IInvalidPythonPathInDebuggerService extends IDiagnosticsService {
     validatePythonPath(pythonPath?: string, pythonPathSource?: PythonPathSource, resource?: Uri): Promise<boolean>;
-}
-export const ISourceMapSupportService = Symbol('ISourceMapSupportService');
-export interface ISourceMapSupportService {
-    register(): void;
-    enable(): Promise<void>;
 }

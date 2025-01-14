@@ -6,11 +6,17 @@
 import { inject, injectable } from 'inversify';
 import * as path from 'path';
 import { Disposable, Uri } from 'vscode';
-import { ICommandManager, IDocumentManager, IWorkspaceService } from '../../common/application/types';
+import {
+    IApplicationShell,
+    ICommandManager,
+    IDocumentManager,
+    IWorkspaceService,
+} from '../../common/application/types';
 import '../../common/extensions';
 import { IFileSystem, IPlatformService } from '../../common/platform/types';
 import { ITerminalServiceFactory } from '../../common/terminal/types';
 import { IConfigurationService, IDisposableRegistry } from '../../common/types';
+import { IInterpreterService } from '../../interpreter/contracts';
 import { copyPythonExecInfo, PythonExecInfo } from '../../pythonEnvironments/exec';
 import { DjangoContextInitializer } from './djangoContext';
 import { TerminalCodeExecutionProvider } from './terminalCodeExecution';
@@ -26,8 +32,19 @@ export class DjangoShellCodeExecutionProvider extends TerminalCodeExecutionProvi
         @inject(ICommandManager) commandManager: ICommandManager,
         @inject(IFileSystem) fileSystem: IFileSystem,
         @inject(IDisposableRegistry) disposableRegistry: Disposable[],
+        @inject(IInterpreterService) interpreterService: IInterpreterService,
+        @inject(IApplicationShell) applicationShell: IApplicationShell,
     ) {
-        super(terminalServiceFactory, configurationService, workspace, disposableRegistry, platformService);
+        super(
+            terminalServiceFactory,
+            configurationService,
+            workspace,
+            disposableRegistry,
+            platformService,
+            interpreterService,
+            commandManager,
+            applicationShell,
+        );
         this.terminalTitle = 'Django Shell';
         disposableRegistry.push(new DjangoContextInitializer(documentManager, workspace, fileSystem, commandManager));
     }
@@ -43,7 +60,7 @@ export class DjangoShellCodeExecutionProvider extends TerminalCodeExecutionProvi
         const workspaceRoot = workspaceUri ? workspaceUri.uri.fsPath : defaultWorkspace;
         const managePyPath = workspaceRoot.length === 0 ? 'manage.py' : path.join(workspaceRoot, 'manage.py');
 
-        return copyPythonExecInfo(info, [managePyPath.fileToCommandArgument(), 'shell']);
+        return copyPythonExecInfo(info, [managePyPath.fileToCommandArgumentForPythonExt(), 'shell']);
     }
 
     public async getExecuteFileArgs(resource?: Uri, executeArgs: string[] = []): Promise<PythonExecInfo> {

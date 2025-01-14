@@ -151,7 +151,7 @@ class MockSocketClient {
             } catch (ex) {
                 this.SocketStream.Write(Buffer.from(ResponseCommands.Error));
 
-                const errorMessage = `Fatal error in handling data at socket client. Error: ${ex.message}`;
+                const errorMessage = `Fatal error in handling data at socket client. Error: ${(ex as Error).message}`;
                 const errorBuffer = Buffer.concat([
                     Buffer.concat([Buffer.from('A'), uint64be.encode(errorMessage.length)]),
                     Buffer.from(errorMessage),
@@ -189,7 +189,7 @@ suite('SocketCallbackHandler', () => {
         expect(port).to.be.greaterThan(0);
     });
     test('Succesfully starts with specific port', async () => {
-        const availablePort = await getFreePort({ host: 'localhost' });
+        const availablePort = await getFreePort.default({ host: 'localhost' });
         const port = await socketServer.Start({ port: availablePort, host: 'localhost' });
         expect(port).to.be.equal(availablePort);
     });
@@ -271,7 +271,7 @@ suite('SocketCallbackHandler', () => {
                 expect(message).to.be.equal(PING_MESSAGE);
                 def.resolve();
             } catch (ex) {
-                def.reject(ex);
+                def.reject(ex as Error);
             }
         });
         callbackHandler.on('error', (actual: string, expected: string, message: string) => {
@@ -311,7 +311,7 @@ suite('SocketCallbackHandler', () => {
     });
     test('Succesful Handshake with specific port', async () => {
         const availablePort = await new Promise<number>((resolve, reject) =>
-            getFreePort({ host: 'localhost' }).then(resolve, reject),
+            getFreePort.default({ host: 'localhost' }).then(resolve, reject),
         );
         const port = await socketServer.Start({ port: availablePort, host: 'localhost' });
 

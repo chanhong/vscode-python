@@ -9,21 +9,15 @@ import { anything, instance, mock, verify, when } from 'ts-mockito';
 import * as typemoq from 'typemoq';
 import { TextDocument, Uri, WorkspaceFolder } from 'vscode';
 import { ExtensionActivationManager } from '../../client/activation/activationManager';
-import { LanguageServerExtensionActivationService } from '../../client/activation/activationService';
-import { IExtensionActivationService, IExtensionSingleActivationService } from '../../client/activation/types';
 import { IApplicationDiagnostics } from '../../client/application/types';
 import { ActiveResourceService } from '../../client/common/application/activeResource';
 import { IActiveResourceService, IDocumentManager, IWorkspaceService } from '../../client/common/application/types';
 import { WorkspaceService } from '../../client/common/application/workspace';
 import { PYTHON_LANGUAGE } from '../../client/common/constants';
-import { DeprecatePythonPath } from '../../client/common/experiments/groups';
-import { ExperimentService } from '../../client/common/experiments/service';
 import { FileSystem } from '../../client/common/platform/fileSystem';
 import { IFileSystem } from '../../client/common/platform/types';
-import { IDisposable, IExperimentService, IInterpreterPathService } from '../../client/common/types';
+import { IDisposable, IInterpreterPathService } from '../../client/common/types';
 import { IInterpreterAutoSelectionService } from '../../client/interpreter/autoSelection/types';
-import { IInterpreterService } from '../../client/interpreter/contracts';
-import { InterpreterService } from '../../client/interpreter/interpreterService';
 import * as EnvFileTelemetry from '../../client/telemetry/envFileTelemetry';
 import { sleep } from '../core';
 
@@ -46,40 +40,35 @@ suite('Activation Manager', () => {
         let workspaceService: IWorkspaceService;
         let appDiagnostics: typemoq.IMock<IApplicationDiagnostics>;
         let autoSelection: typemoq.IMock<IInterpreterAutoSelectionService>;
-        let interpreterService: IInterpreterService;
         let activeResourceService: IActiveResourceService;
         let documentManager: typemoq.IMock<IDocumentManager>;
         let interpreterPathService: typemoq.IMock<IInterpreterPathService>;
-        let experiments: IExperimentService;
-        let activationService1: IExtensionActivationService;
-        let activationService2: IExtensionActivationService;
         let fileSystem: IFileSystem;
         setup(() => {
-            experiments = mock(ExperimentService);
             interpreterPathService = typemoq.Mock.ofType<IInterpreterPathService>();
+            interpreterPathService
+                .setup((i) => i.copyOldInterpreterStorageValuesToNew(typemoq.It.isAny()))
+                .returns(() => Promise.resolve());
             workspaceService = mock(WorkspaceService);
             activeResourceService = mock(ActiveResourceService);
             appDiagnostics = typemoq.Mock.ofType<IApplicationDiagnostics>();
             autoSelection = typemoq.Mock.ofType<IInterpreterAutoSelectionService>();
-            interpreterService = mock(InterpreterService);
             documentManager = typemoq.Mock.ofType<IDocumentManager>();
-            activationService1 = mock(LanguageServerExtensionActivationService);
-            activationService2 = mock(LanguageServerExtensionActivationService);
             fileSystem = mock(FileSystem);
             interpreterPathService
                 .setup((i) => i.onDidChange(typemoq.It.isAny()))
                 .returns(() => typemoq.Mock.ofType<IDisposable>().object);
+            when(workspaceService.isTrusted).thenReturn(true);
+            when(workspaceService.isVirtualWorkspace).thenReturn(false);
             managerTest = new ExtensionActivationManagerTest(
-                [instance(activationService1), instance(activationService2)],
+                [],
                 [],
                 documentManager.object,
-                instance(interpreterService),
                 autoSelection.object,
                 appDiagnostics.object,
                 instance(workspaceService),
                 instance(fileSystem),
                 instance(activeResourceService),
-                instance(experiments),
                 interpreterPathService.object,
             );
 
@@ -90,6 +79,102 @@ suite('Activation Manager', () => {
             sinon.restore();
         });
 
+        test('If running in a virtual workspace, do not activate services that do not support it', async () => {
+            when(workspaceService.isVirtualWorkspace).thenReturn(true);
+            const resource = Uri.parse('two');
+            const workspaceFolder = {
+                index: 0,
+                name: 'one',
+                uri: resource,
+            };
+            when(workspaceService.getWorkspaceFolder(resource)).thenReturn(workspaceFolder);
+
+            autoSelection
+                .setup((a) => a.autoSelectInterpreter(resource))
+                .returns(() => Promise.resolve())
+                .verifiable(typemoq.Times.once());
+            appDiagnostics
+                .setup((a) => a.performPreStartupHealthCheck(resource))
+                .returns(() => Promise.resolve())
+                .verifiable(typemoq.Times.once());
+
+            managerTest = new ExtensionActivationManagerTest(
+                [],
+                [],
+                documentManager.object,
+                autoSelection.object,
+                appDiagnostics.object,
+                instance(workspaceService),
+                instance(fileSystem),
+                instance(activeResourceService),
+                interpreterPathService.object,
+            );
+            await managerTest.activateWorkspace(resource);
+
+            autoSelection.verifyAll();
+            appDiagnostics.verifyAll();
+        });
+
+        test('If running in a untrusted workspace, do not activate services that do not support it', async () => {
+            when(workspaceService.isTrusted).thenReturn(false);
+            const resource = Uri.parse('two');
+            const workspaceFolder = {
+                index: 0,
+                name: 'one',
+                uri: resource,
+            };
+            when(workspaceService.getWorkspaceFolder(resource)).thenReturn(workspaceFolder);
+
+            autoSelection
+                .setup((a) => a.autoSelectInterpreter(resource))
+                .returns(() => Promise.resolve())
+                .verifiable(typemoq.Times.never());
+            appDiagnostics
+                .setup((a) => a.performPreStartupHealthCheck(resource))
+                .returns(() => Promise.resolve())
+                .verifiable(typemoq.Times.once());
+
+            managerTest = new ExtensionActivationManagerTest(
+                [],
+                [],
+                documentManager.object,
+                autoSelection.object,
+                appDiagnostics.object,
+                instance(workspaceService),
+                instance(fileSystem),
+                instance(activeResourceService),
+                interpreterPathService.object,
+            );
+            await managerTest.activateWorkspace(resource);
+
+            appDiagnostics.verifyAll();
+        });
+
+        test('Otherwise activate all services filtering to the current resource', async () => {
+            const resource = Uri.parse('two');
+
+            autoSelection
+                .setup((a) => a.autoSelectInterpreter(resource))
+                .returns(() => Promise.resolve())
+                .verifiable(typemoq.Times.once());
+            appDiagnostics
+                .setup((a) => a.performPreStartupHealthCheck(resource))
+                .returns(() => Promise.resolve())
+                .verifiable(typemoq.Times.once());
+
+            const workspaceFolder = {
+                index: 0,
+                name: 'one',
+                uri: resource,
+            };
+            when(workspaceService.getWorkspaceFolder(resource)).thenReturn(workspaceFolder);
+
+            await managerTest.activateWorkspace(resource);
+
+            autoSelection.verifyAll();
+            appDiagnostics.verifyAll();
+        });
+
         test('Initialize will add event handlers and will dispose them when running dispose', async () => {
             const disposable = typemoq.Mock.ofType<IDisposable>();
             const disposable2 = typemoq.Mock.ofType<IDisposable>();
@@ -98,7 +183,6 @@ suite('Activation Manager', () => {
                 (1 as unknown) as WorkspaceFolder,
                 (2 as unknown) as WorkspaceFolder,
             ]);
-            when(workspaceService.hasWorkspaceFolders).thenReturn(true);
             const eventDef = () => disposable2.object;
             documentManager
                 .setup((d) => d.onDidOpenTextDocument)
@@ -108,7 +192,6 @@ suite('Activation Manager', () => {
             await managerTest.initialize();
 
             verify(workspaceService.workspaceFolders).once();
-            verify(workspaceService.hasWorkspaceFolders).once();
             verify(workspaceService.onDidChangeWorkspaceFolders).once();
 
             documentManager.verifyAll();
@@ -129,7 +212,6 @@ suite('Activation Manager', () => {
                 (1 as unknown) as WorkspaceFolder,
                 (2 as unknown) as WorkspaceFolder,
             ]);
-            when(workspaceService.hasWorkspaceFolders).thenReturn(true);
             const eventDef = () => disposable2.object;
             documentManager
                 .setup((d) => d.onDidOpenTextDocument)
@@ -141,18 +223,15 @@ suite('Activation Manager', () => {
             await managerTest.initialize();
 
             verify(workspaceService.workspaceFolders).once();
-            verify(workspaceService.hasWorkspaceFolders).once();
             verify(workspaceService.onDidChangeWorkspaceFolders).once();
             documentManager.verifyAll();
             disposable.verify((d) => d.dispose(), typemoq.Times.never());
             disposable2.verify((d) => d.dispose(), typemoq.Times.never());
 
             when(workspaceService.workspaceFolders).thenReturn([]);
-            when(workspaceService.hasWorkspaceFolders).thenReturn(false);
 
             await managerTest.initialize();
 
-            verify(workspaceService.hasWorkspaceFolders).twice();
             disposable.verify((d) => d.dispose(), typemoq.Times.never());
             disposable2.verify((d) => d.dispose(), typemoq.Times.once());
 
@@ -189,13 +268,9 @@ suite('Activation Manager', () => {
             const folder2 = { name: 'two', uri: resource, index: 2 };
             when(workspaceService.getWorkspaceFolderIdentifier(anything(), anything())).thenReturn('one');
             when(workspaceService.workspaceFolders).thenReturn([folder1, folder2]);
-            when(workspaceService.hasWorkspaceFolders).thenReturn(true);
             when(workspaceService.getWorkspaceFolder(document.object.uri)).thenReturn(folder2);
 
             when(workspaceService.getWorkspaceFolder(resource)).thenReturn(folder2);
-            when(activationService1.activate(resource)).thenResolve();
-            when(activationService2.activate(resource)).thenResolve();
-            when(interpreterService.getInterpreters(anything())).thenResolve();
             autoSelection
                 .setup((a) => a.autoSelectInterpreter(resource))
                 .returns(() => Promise.resolve())
@@ -219,63 +294,12 @@ suite('Activation Manager', () => {
             documentManager.verifyAll();
             verify(workspaceService.onDidChangeWorkspaceFolders).once();
             verify(workspaceService.workspaceFolders).atLeast(1);
-            verify(workspaceService.hasWorkspaceFolders).once();
             verify(workspaceService.getWorkspaceFolder(anything())).atLeast(1);
-            verify(activationService1.activate(resource)).once();
-            verify(activationService2.activate(resource)).once();
-        });
-
-        test('Function activateWorkspace() will be filtered to current resource', async () => {
-            const resource = Uri.parse('two');
-            when(activationService1.activate(resource)).thenResolve();
-            when(activationService2.activate(resource)).thenResolve();
-            when(interpreterService.getInterpreters(anything())).thenResolve();
-            autoSelection
-                .setup((a) => a.autoSelectInterpreter(resource))
-                .returns(() => Promise.resolve())
-                .verifiable(typemoq.Times.once());
-            appDiagnostics
-                .setup((a) => a.performPreStartupHealthCheck(resource))
-                .returns(() => Promise.resolve())
-                .verifiable(typemoq.Times.once());
-
-            await managerTest.activateWorkspace(resource);
-
-            verify(activationService1.activate(resource)).once();
-            verify(activationService2.activate(resource)).once();
-        });
-
-        test('If in Deprecate PythonPath experiment, method activateWorkspace() will copy old interpreter storage values to new', async () => {
-            const resource = Uri.parse('two');
-            when(activationService1.activate(resource)).thenResolve();
-            when(activationService2.activate(resource)).thenResolve();
-            when(interpreterService.getInterpreters(anything())).thenResolve();
-            when(experiments.inExperimentSync(DeprecatePythonPath.experiment)).thenReturn(true);
-            interpreterPathService
-                .setup((i) => i.copyOldInterpreterStorageValuesToNew(resource))
-                .returns(() => Promise.resolve())
-                .verifiable(typemoq.Times.once());
-            autoSelection
-                .setup((a) => a.autoSelectInterpreter(resource))
-                .returns(() => Promise.resolve())
-                .verifiable(typemoq.Times.once());
-            appDiagnostics
-                .setup((a) => a.performPreStartupHealthCheck(resource))
-                .returns(() => Promise.resolve())
-                .verifiable(typemoq.Times.once());
-
-            await managerTest.activateWorkspace(resource);
-
-            interpreterPathService.verifyAll();
-            verify(activationService1.activate(resource)).once();
-            verify(activationService2.activate(resource)).once();
         });
 
         test("The same workspace isn't activated more than once", async () => {
             const resource = Uri.parse('two');
-            when(activationService1.activate(resource)).thenResolve();
-            when(activationService2.activate(resource)).thenResolve();
-            when(interpreterService.getInterpreters(anything())).thenResolve();
+
             autoSelection
                 .setup((a) => a.autoSelectInterpreter(resource))
                 .returns(() => Promise.resolve())
@@ -284,12 +308,16 @@ suite('Activation Manager', () => {
                 .setup((a) => a.performPreStartupHealthCheck(resource))
                 .returns(() => Promise.resolve())
                 .verifiable(typemoq.Times.once());
+            const workspaceFolder = {
+                index: 0,
+                name: 'one',
+                uri: resource,
+            };
+            when(workspaceService.getWorkspaceFolder(resource)).thenReturn(workspaceFolder);
 
             await managerTest.activateWorkspace(resource);
             await managerTest.activateWorkspace(resource);
 
-            verify(activationService1.activate(resource)).once();
-            verify(activationService2.activate(resource)).once();
             autoSelection.verifyAll();
             appDiagnostics.verifyAll();
         });
@@ -310,12 +338,11 @@ suite('Activation Manager', () => {
                 languageId: PYTHON_LANGUAGE,
             };
             when(workspaceService.getWorkspaceFolderIdentifier(doc.uri, anything())).thenReturn('');
-            when(workspaceService.hasWorkspaceFolders).thenReturn(true);
 
             managerTest.onDocOpened((doc as unknown) as TextDocument);
 
             verify(workspaceService.getWorkspaceFolderIdentifier(doc.uri, anything())).once();
-            verify(workspaceService.getWorkspaceFolder(doc.uri)).never();
+            verify(workspaceService.getWorkspaceFolder(doc.uri)).once();
         });
 
         test('If workspace corresponding to the doc has already been activated, then do nothing', async () => {
@@ -365,7 +392,6 @@ suite('Activation Manager', () => {
             managerTest.activatedWorkspaces.add('one');
             managerTest.activatedWorkspaces.add('two');
 
-            when(workspaceService.hasWorkspaceFolders).thenReturn(true);
             // Add workspaceFoldersChangedHandler
             managerTest.addHandlers();
             expect(workspaceFoldersChangedHandler).not.to.be.equal(undefined, 'Handler not set');
@@ -377,100 +403,17 @@ suite('Activation Manager', () => {
             documentManager.verifyAll();
             verify(workspaceService.onDidChangeWorkspaceFolders).once();
             verify(workspaceService.workspaceFolders).atLeast(1);
-            verify(workspaceService.hasWorkspaceFolders).once();
 
             // Removed no. of folders to one
             when(workspaceService.workspaceFolders).thenReturn([folder1]);
-            when(workspaceService.hasWorkspaceFolders).thenReturn(true);
             disposable2.setup((d) => d.dispose()).verifiable(typemoq.Times.once());
 
             workspaceFoldersChangedHandler.call(managerTest);
 
             verify(workspaceService.workspaceFolders).atLeast(1);
-            verify(workspaceService.hasWorkspaceFolders).twice();
             disposable2.verifyAll();
 
             assert.deepEqual(Array.from(managerTest.activatedWorkspaces.keys()), ['one']);
-        });
-    });
-
-    suite('Language Server Activation - activate()', () => {
-        let workspaceService: IWorkspaceService;
-        let appDiagnostics: typemoq.IMock<IApplicationDiagnostics>;
-        let autoSelection: typemoq.IMock<IInterpreterAutoSelectionService>;
-        let interpreterService: IInterpreterService;
-        let activeResourceService: IActiveResourceService;
-        let documentManager: typemoq.IMock<IDocumentManager>;
-        let activationService1: IExtensionActivationService;
-        let activationService2: IExtensionActivationService;
-        let fileSystem: IFileSystem;
-        let singleActivationService: typemoq.IMock<IExtensionSingleActivationService>;
-        let initialize: sinon.SinonStub;
-        let activateWorkspace: sinon.SinonStub;
-        let managerTest: ExtensionActivationManager;
-        const resource = Uri.parse('a');
-        let interpreterPathService: typemoq.IMock<IInterpreterPathService>;
-        let experiments: IExperimentService;
-
-        setup(() => {
-            experiments = mock(ExperimentService);
-            workspaceService = mock(WorkspaceService);
-            activeResourceService = mock(ActiveResourceService);
-            appDiagnostics = typemoq.Mock.ofType<IApplicationDiagnostics>();
-            autoSelection = typemoq.Mock.ofType<IInterpreterAutoSelectionService>();
-            interpreterPathService = typemoq.Mock.ofType<IInterpreterPathService>();
-            interpreterService = mock(InterpreterService);
-            documentManager = typemoq.Mock.ofType<IDocumentManager>();
-            activationService1 = mock(LanguageServerExtensionActivationService);
-            activationService2 = mock(LanguageServerExtensionActivationService);
-            fileSystem = mock(FileSystem);
-            singleActivationService = typemoq.Mock.ofType<IExtensionSingleActivationService>();
-            initialize = sinon.stub(ExtensionActivationManager.prototype, 'initialize');
-            initialize.resolves();
-            activateWorkspace = sinon.stub(ExtensionActivationManager.prototype, 'activateWorkspace');
-            activateWorkspace.resolves();
-            interpreterPathService
-                .setup((i) => i.onDidChange(typemoq.It.isAny()))
-                .returns(() => typemoq.Mock.ofType<IDisposable>().object);
-            managerTest = new ExtensionActivationManager(
-                [instance(activationService1), instance(activationService2)],
-                [singleActivationService.object],
-                documentManager.object,
-                instance(interpreterService),
-                autoSelection.object,
-                appDiagnostics.object,
-                instance(workspaceService),
-                instance(fileSystem),
-                instance(activeResourceService),
-                instance(experiments),
-                interpreterPathService.object,
-            );
-        });
-
-        teardown(() => {
-            sinon.restore();
-        });
-
-        test('Execution goes as expected if there are no errors', async () => {
-            singleActivationService
-                .setup((s) => s.activate())
-                .returns(() => Promise.resolve())
-                .verifiable(typemoq.Times.once());
-            when(activeResourceService.getActiveResource()).thenReturn(resource);
-            await managerTest.activate();
-            assert.ok(initialize.calledOnce);
-            assert.ok(activateWorkspace.calledOnce);
-            singleActivationService.verifyAll();
-        });
-
-        test('Throws error if execution fails', async () => {
-            singleActivationService
-                .setup((s) => s.activate())
-                .returns(() => Promise.reject(new Error('Kaboom')))
-                .verifiable(typemoq.Times.once());
-            when(activeResourceService.getActiveResource()).thenReturn(resource);
-            const promise = managerTest.activate();
-            await expect(promise).to.eventually.be.rejectedWith('Kaboom');
         });
     });
 });

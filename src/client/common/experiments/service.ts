@@ -3,15 +3,15 @@
 
 'use strict';
 
-import { inject, injectable, named } from 'inversify';
-import { Memento } from 'vscode';
+import { inject, injectable } from 'inversify';
+import { l10n } from 'vscode';
 import { getExperimentationService, IExperimentationService, TargetPopulation } from 'vscode-tas-client';
+import { traceLog } from '../../logging';
 import { sendTelemetryEvent } from '../../telemetry';
 import { EventName } from '../../telemetry/constants';
 import { IApplicationEnvironment, IWorkspaceService } from '../application/types';
-import { PVSC_EXTENSION_ID, STANDARD_OUTPUT_CHANNEL } from '../constants';
-import { GLOBAL_MEMENTO, IExperimentService, IMemento, IOutputChannel } from '../types';
-import { Experiments } from '../utils/localize';
+import { PVSC_EXTENSION_ID } from '../constants';
+import { IExperimentService, IPersistentStateFactory } from '../types';
 import { ExperimentationTelemetry } from './telemetry';
 
 const EXP_MEMENTO_KEY = 'VSCode.ABExp.FeatureData';
@@ -29,6 +29,11 @@ export class ExperimentService implements IExperimentService {
      */
     public _optOutFrom: string[] = [];
 
+    private readonly experiments = this.persistentState.createGlobalPersistentState<{ features: string[] }>(
+        EXP_MEMENTO_KEY,
+        { features: [] },
+    );
+
     private readonly enabled: boolean;
 
     private readonly experimentationService?: IExperimentationService;
@@ -36,8 +41,7 @@ export class ExperimentService implements IExperimentService {
     constructor(
         @inject(IWorkspaceService) readonly workspaceService: IWorkspaceService,
         @inject(IApplicationEnvironment) private readonly appEnvironment: IApplicationEnvironment,
-        @inject(IMemento) @named(GLOBAL_MEMENTO) private readonly globalState: Memento,
-        @inject(IOutputChannel) @named(STANDARD_OUTPUT_CHANNEL) private readonly output: IOutputChannel,
+        @inject(IPersistentStateFactory) private readonly persistentState: IPersistentStateFactory,
     ) {
         const settings = this.workspaceService.getConfiguration('python');
         // Users can only opt in or out of experiment groups, not control groups.
@@ -59,8 +63,8 @@ export class ExperimentService implements IExperimentService {
         }
 
         let targetPopulation: TargetPopulation;
-
-        if (this.appEnvironment.extensionChannel === 'insiders') {
+        // if running in VS Code Insiders, use the Insiders target population
+        if (this.appEnvironment.channel === 'insiders') {
             targetPopulation = TargetPopulation.Insiders;
         } else {
             targetPopulation = TargetPopulation.Public;
@@ -73,10 +77,8 @@ export class ExperimentService implements IExperimentService {
             this.appEnvironment.packageJson.version!,
             targetPopulation,
             telemetryReporter,
-            this.globalState,
+            this.experiments.storage,
         );
-
-        this.logExperiments();
     }
 
     public async activate(): Promise<void> {
@@ -84,8 +86,7 @@ export class ExperimentService implements IExperimentService {
             const initStart = Date.now();
             await this.experimentationService.initializePromise;
 
-            const experiments = this.globalState.get<{ features: string[] }>(EXP_MEMENTO_KEY, { features: [] });
-            if (experiments.features.length === 0) {
+            if (this.experiments.value.features.length === 0) {
                 // Only await on this if we don't have anything in cache.
                 // This means that we start the session with partial experiment info.
                 // We accept this as a compromise to avoid delaying startup.
@@ -99,6 +100,7 @@ export class ExperimentService implements IExperimentService {
                 await this.experimentationService.initialFetch;
                 sendTelemetryEvent(EventName.PYTHON_EXPERIMENTS_INIT_PERFORMANCE, Date.now() - initStart);
             }
+            this.logExperiments();
         }
         sendOptInOptOutTelemetry(this._optInto, this._optOutFrom, this.appEnvironment.packageJson);
     }
@@ -130,7 +132,7 @@ export class ExperimentService implements IExperimentService {
         // it means that the value for this experiment was not found on the server.
         const treatmentVariable = this.experimentationService.getTreatmentVariable(EXP_CONFIG_ID, experiment);
 
-        return treatmentVariable !== undefined;
+        return treatmentVariable === true;
     }
 
     public async getExperimentValue<T extends boolean | number | string>(experiment: string): Promise<T | undefined> {
@@ -142,9 +144,25 @@ export class ExperimentService implements IExperimentService {
     }
 
     private logExperiments() {
+        const telemetrySettings = this.workspaceService.getConfiguration('telemetry');
+        let experimentsDisabled = false;
+        if (telemetrySettings && telemetrySettings.get<boolean>('enableTelemetry') === false) {
+            traceLog('Telemetry is disabled');
+            experimentsDisabled = true;
+        }
+
+        if (telemetrySettings && telemetrySettings.get<string>('telemetryLevel') === 'off') {
+            traceLog('Telemetry level is off');
+            experimentsDisabled = true;
+        }
+
+        if (experimentsDisabled) {
+            traceLog('Experiments are disabled, only manually opted experiments are active.');
+        }
+
         if (this._optOutFrom.includes('All')) {
             // We prioritize opt out first
-            this.output.appendLine(Experiments.optedOutOf().format('All'));
+            traceLog(l10n.t("Experiment '{0}' is inactive", 'All'));
 
             // Since we are in the Opt Out all case, this means when checking for experiment we
             // short circuit and return. So, printing out additional experiment info might cause
@@ -153,41 +171,41 @@ export class ExperimentService implements IExperimentService {
         }
         if (this._optInto.includes('All')) {
             // Only if 'All' is not in optOut then check if it is in Opt In.
-            this.output.appendLine(Experiments.inGroup().format('All'));
+            traceLog(l10n.t("Experiment '{0}' is active", 'All'));
 
             // Similar to the opt out case. If user is opting into to all experiments we short
             // circuit the experiment checks. So, skip printing any additional details to the logs.
             return;
         }
 
-        const experiments = this.globalState.get<{ features: string[] }>(EXP_MEMENTO_KEY, { features: [] });
-
         // Log experiments that users manually opt out, these are experiments which are added using the exp framework.
         this._optOutFrom
             .filter((exp) => exp !== 'All' && exp.toLowerCase().startsWith('python'))
             .forEach((exp) => {
-                this.output.appendLine(Experiments.optedOutOf().format(exp));
+                traceLog(l10n.t("Experiment '{0}' is inactive", exp));
             });
 
         // Log experiments that users manually opt into, these are experiments which are added using the exp framework.
         this._optInto
             .filter((exp) => exp !== 'All' && exp.toLowerCase().startsWith('python'))
             .forEach((exp) => {
-                this.output.appendLine(Experiments.inGroup().format(exp));
+                traceLog(l10n.t("Experiment '{0}' is active", exp));
             });
 
-        // Log experiments that users are added to by the exp framework
-        experiments.features.forEach((exp) => {
-            // Filter out experiment groups that are not from the Python extension.
-            // Filter out experiment groups that are not already opted out or opted into.
-            if (
-                exp.toLowerCase().startsWith('python') &&
-                !this._optOutFrom.includes(exp) &&
-                !this._optInto.includes(exp)
-            ) {
-                this.output.appendLine(Experiments.inGroup().format(exp));
-            }
-        });
+        if (!experimentsDisabled) {
+            // Log experiments that users are added to by the exp framework
+            this.experiments.value.features.forEach((exp) => {
+                // Filter out experiment groups that are not from the Python extension.
+                // Filter out experiment groups that are not already opted out or opted into.
+                if (
+                    exp.toLowerCase().startsWith('python') &&
+                    !this._optOutFrom.includes(exp) &&
+                    !this._optInto.includes(exp)
+                ) {
+                    traceLog(l10n.t("Experiment '{0}' is active", exp));
+                }
+            });
+        }
     }
 }
 
@@ -229,8 +247,10 @@ function sendOptInOptOutTelemetry(optedIn: string[], optedOut: string[], package
     const sanitizedOptedIn = optedIn.filter((exp) => optedInEnumValues.includes(exp));
     const sanitizedOptedOut = optedOut.filter((exp) => optedOutEnumValues.includes(exp));
 
+    JSON.stringify(sanitizedOptedIn.sort());
+
     sendTelemetryEvent(EventName.PYTHON_EXPERIMENTS_OPT_IN_OPT_OUT_SETTINGS, undefined, {
-        optedInto: sanitizedOptedIn,
-        optedOutFrom: sanitizedOptedOut,
+        optedInto: JSON.stringify(sanitizedOptedIn.sort()),
+        optedOutFrom: JSON.stringify(sanitizedOptedOut.sort()),
     });
 }

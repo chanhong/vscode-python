@@ -1,11 +1,11 @@
 'use strict';
 
 import { inject, injectable } from 'inversify';
-import { ConfigurationChangeEvent, Disposable, Uri, tests, TestResultState, WorkspaceFolder } from 'vscode';
+import { ConfigurationChangeEvent, Disposable, Uri, tests, TestResultState, WorkspaceFolder, Command } from 'vscode';
 import { IApplicationShell, ICommandManager, IContextKeyManager, IWorkspaceService } from '../common/application/types';
 import * as constants from '../common/constants';
 import '../common/extensions';
-import { IDisposableRegistry, IExperimentService, Product } from '../common/types';
+import { IDisposableRegistry, Product } from '../common/types';
 import { IInterpreterService } from '../interpreter/contracts';
 import { IServiceContainer } from '../ioc/types';
 import { EventName } from '../telemetry/constants';
@@ -16,12 +16,11 @@ import { ITestConfigurationService, ITestsHelper } from './common/types';
 import { ITestingService } from './types';
 import { IExtensionActivationService } from '../activation/types';
 import { ITestController } from './testController/common/types';
-import { traceVerbose } from '../common/logger';
 import { DelayedTrigger, IDelayedTrigger } from '../common/utils/delayTrigger';
-import { ShowRefreshTests, ShowRunFailedTests } from '../common/experiments/groups';
 import { ExtensionContextKey } from '../common/application/contextKeys';
 import { checkForFailedTests, updateTestResultMap } from './testController/common/testItemUtilities';
 import { Testing } from '../common/utils/localize';
+import { traceVerbose } from '../logging';
 
 @injectable()
 export class TestingService implements ITestingService {
@@ -36,6 +35,7 @@ export class TestingService implements ITestingService {
 @injectable()
 export class UnitTestManagementService implements IExtensionActivationService {
     private activatedOnce: boolean = false;
+    public readonly supportedWorkspaceTypes = { untrustedWorkspace: false, virtualWorkspace: false };
     private readonly disposableRegistry: Disposable[];
     private workspaceService: IWorkspaceService;
     private context: IContextKeyManager;
@@ -98,10 +98,10 @@ export class UnitTestManagementService implements IExtensionActivationService {
                     // Once that is fixed delete this notification and test should be configured from the test view.
                     const app = this.serviceContainer.get<IApplicationShell>(IApplicationShell);
                     const response = await app.showInformationMessage(
-                        Testing.testNotConfigured(),
-                        Testing.configureTests(),
+                        Testing.testNotConfigured,
+                        Testing.configureTests,
                     );
-                    if (response === Testing.configureTests()) {
+                    if (response === Testing.configureTests) {
                         await commandManager.executeCommand(
                             constants.Commands.Tests_Configure,
                             undefined,
@@ -112,17 +112,6 @@ export class UnitTestManagementService implements IExtensionActivationService {
                 }
             });
         }
-
-        // Enable buttons based on experiment
-        const experiments = this.serviceContainer.get<IExperimentService>(IExperimentService);
-        await this.context.setContext(
-            ExtensionContextKey.InShowRunFailedTestsExperiment,
-            await experiments.inExperiment(ShowRunFailedTests.experiment),
-        );
-        await this.context.setContext(
-            ExtensionContextKey.InShowRefreshingTestsExperiment,
-            await experiments.inExperiment(ShowRefreshTests.experiment),
-        );
     }
 
     private async updateTestUIButtons() {
@@ -157,6 +146,12 @@ export class UnitTestManagementService implements IExtensionActivationService {
         if (!wkspace) {
             return;
         }
+        const interpreterService = this.serviceContainer.get<IInterpreterService>(IInterpreterService);
+        const commandManager = this.serviceContainer.get<ICommandManager>(ICommandManager);
+        if (!(await interpreterService.getActiveInterpreter(wkspace))) {
+            commandManager.executeCommand(constants.Commands.TriggerEnvironmentSelection, wkspace);
+            return;
+        }
         const configurationService = this.serviceContainer.get<ITestConfigurationService>(ITestConfigurationService);
         await configurationService.promptToEnableAndConfigureTestFramework(wkspace!);
     }
@@ -175,28 +170,30 @@ export class UnitTestManagementService implements IExtensionActivationService {
                     this.testController?.refreshTestData(resource, { forceRefresh: true });
                 },
             ),
-            commandManager.registerCommand(
-                constants.Commands.Test_Refresh,
-                async (
-                    _,
-                    cmdSource: constants.CommandSource = constants.CommandSource.commandPalette,
-                    resource?: Uri,
-                ) => {
-                    traceVerbose('Testing: Manually triggered test refresh');
-                    sendTelemetryEvent(EventName.UNITTEST_DISCOVERY_TRIGGER, undefined, {
-                        trigger: cmdSource,
-                    });
-                    this.testController?.refreshTestData(resource, { forceRefresh: true });
-                },
-            ),
-            commandManager.registerCommand(constants.Commands.Test_Refreshing, () => {
-                // We don't do anything if this is clicked. This is just to show
-                // the spinning refresh icon.
-            }),
-            commandManager.registerCommand(constants.Commands.Test_Stop_Refreshing, () => {
-                traceVerbose('Testing: Stop refreshing clicked.');
-                sendTelemetryEvent(EventName.UNITTEST_DISCOVERING_STOP);
-                this.testController?.stopRefreshing();
+            commandManager.registerCommand(constants.Commands.Tests_CopilotSetup, (resource?: Uri):
+                | { message: string; command: Command }
+                | undefined => {
+                const wkspaceFolder =
+                    this.workspaceService.getWorkspaceFolder(resource) || this.workspaceService.workspaceFolders?.at(0);
+                if (!wkspaceFolder) {
+                    return undefined;
+                }
+
+                const configurationService = this.serviceContainer.get<ITestConfigurationService>(
+                    ITestConfigurationService,
+                );
+                if (configurationService.hasConfiguredTests(wkspaceFolder.uri)) {
+                    return undefined;
+                }
+
+                return {
+                    message: Testing.copilotSetupMessage,
+                    command: {
+                        title: Testing.configureTests,
+                        command: constants.Commands.Tests_Configure,
+                        arguments: [undefined, constants.CommandSource.ui, resource],
+                    },
+                };
             }),
         );
     }

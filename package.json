@@ -1,23 +1,33 @@
 {
     "name": "python",
     "displayName": "Python",
-    "description": "IntelliSense (Pylance), Linting, Debugging (multi-threaded, remote), Jupyter Notebooks, code formatting, refactoring, unit tests, and more.",
-    "version": "2021.10.0-dev",
+    "description": "Python language support with extension access points for IntelliSense (Pylance), Debugging (Python Debugger), linting, formatting, refactoring, unit tests, and more.",
+    "version": "2024.23.0-dev",
     "featureFlags": {
         "usingNewInterpreterStorage": true
     },
     "capabilities": {
         "untrustedWorkspaces": {
-            "supported": false
+            "supported": "limited",
+            "description": "Only Partial IntelliSense with Pylance is supported. Cannot execute Python with untrusted files."
         },
         "virtualWorkspaces": {
-            "supported": false,
-            "description": "Python only works with local file paths."
+            "supported": "limited",
+            "description": "Only Partial IntelliSense supported."
         }
     },
-    "languageServerVersion": "0.5.30",
     "publisher": "ms-python",
-    "enableProposedApi": true,
+    "enabledApiProposals": [
+        "contribEditorContentMenu",
+        "quickPickSortByLabel",
+        "testObserver",
+        "quickPickItemTooltip",
+        "terminalDataWriteEvent",
+        "terminalExecuteCommandEvent",
+        "codeActionAI",
+        "notebookReplDocument",
+        "notebookVariableProvider"
+    ],
     "author": {
         "name": "Microsoft Corporation"
     },
@@ -37,8 +47,9 @@
         "theme": "dark"
     },
     "engines": {
-        "vscode": "^1.59.0"
+        "vscode": "^1.94.0-20240918"
     },
+    "enableTelemetry": false,
     "keywords": [
         "python",
         "django",
@@ -48,228 +59,171 @@
     "categories": [
         "Programming Languages",
         "Debuggers",
-        "Linters",
-        "Formatters",
         "Other",
         "Data Science",
-        "Machine Learning",
-        "Notebooks"
+        "Machine Learning"
     ],
     "activationEvents": [
+        "onDebugInitialConfigurations",
         "onLanguage:python",
         "onDebugResolve:python",
-        "onCommand:python.execInTerminal",
-        "onCommand:python.debugInTerminal",
-        "onCommand:python.sortImports",
-        "onCommand:python.setInterpreter",
-        "onCommand:python.setShebangInterpreter",
-        "onCommand:python.viewLanguageServerOutput",
-        "onCommand:python.viewOutput",
-        "onCommand:python.execSelectionInTerminal",
-        "onCommand:python.execSelectionInDjangoShell",
-        "onCommand:python.buildWorkspaceSymbols",
-        "onCommand:python.startREPL",
-        "onCommand:python.goToPythonObject",
-        "onCommand:python.reportIssue",
-        "onCommand:python.setLinter",
-        "onCommand:python.enableLinting",
-        "onCommand:python.createTerminal",
-        "onCommand:python.configureTests",
-        "onCommand:python.switchOffInsidersChannel",
-        "onCommand:python.switchToDailyChannel",
-        "onCommand:python.switchToWeeklyChannel",
-        "onCommand:python.clearWorkspaceInterpreter",
-        "onCommand:python.enableSourceMapSupport",
-        "onCommand:python.launchTensorBoard",
-        "onCommand:python.clearPersistentStorage",
-        "onWalkthrough:pythonWelcome",
-        "onWalkthrough:pythonDataScienceWelcome",
+        "onCommand:python.copilotSetupTests",
         "workspaceContains:mspythonconfig.json",
         "workspaceContains:pyproject.toml",
         "workspaceContains:Pipfile",
         "workspaceContains:setup.py",
         "workspaceContains:requirements.txt",
         "workspaceContains:manage.py",
-        "workspaceContains:app.py"
+        "workspaceContains:app.py",
+        "workspaceContains:.venv",
+        "workspaceContains:.conda"
     ],
     "main": "./out/client/extension",
     "browser": "./dist/extension.browser.js",
+    "l10n": "./l10n",
     "contributes": {
+        "problemMatchers": [
+            {
+                "name": "python",
+                "owner": "python",
+                "source": "python",
+                "fileLocation": "autoDetect",
+                "pattern": [
+                    {
+                        "regexp": "^.*File \\\"([^\\\"]|.*)\\\", line (\\d+).*",
+                        "file": 1,
+                        "line": 2
+                    },
+                    {
+                        "regexp": "^\\s*(.*)\\s*$"
+                    },
+                    {
+                        "regexp": "^\\s*(.*Error.*)$",
+                        "message": 1
+                    }
+                ]
+            }
+        ],
         "walkthroughs": [
             {
                 "id": "pythonWelcome",
-                "title": "Get started with Python development",
-                "description": "Your first steps to set up a Python project with all the powerful tools and features that the Python extension has to offer!",
-                "when": "false",
+                "title": "%walkthrough.pythonWelcome.title%",
+                "description": "%walkthrough.pythonWelcome.description%",
+                "when": "workspacePlatform != webworker",
                 "steps": [
                     {
-                        "id": "python.installPythonWin",
-                        "title": "Install Python",
-                        "description": "The Python Extension requires Python to be installed. Install Python from the [Microsoft Store](https://aka.ms/AAd9rms).\n\n[Install Python](https://aka.ms/AAd9rms)\n",
+                        "id": "python.createPythonFolder",
+                        "title": "%walkthrough.step.python.createPythonFolder.title%",
+                        "description": "%walkthrough.step.python.createPythonFolder.description%",
                         "media": {
-                            "markdown": "resources/walkthrough/install-python-windows.md"
+                            "svg": "resources/walkthrough/open-folder.svg",
+                            "altText": "%walkthrough.step.python.createPythonFile.altText%"
                         },
-                        "when": "workspacePlatform == windows"
+                        "when": "workspaceFolderCount = 0"
+                    },
+                    {
+                        "id": "python.createPythonFile",
+                        "title": "%walkthrough.step.python.createPythonFile.title%",
+                        "description": "%walkthrough.step.python.createPythonFile.description%",
+                        "media": {
+                            "svg": "resources/walkthrough/open-folder.svg",
+                            "altText": "%walkthrough.step.python.createPythonFile.altText%"
+                        }
+                    },
+                    {
+                        "id": "python.installPythonWin8",
+                        "title": "%walkthrough.step.python.installPythonWin8.title%",
+                        "description": "%walkthrough.step.python.installPythonWin8.description%",
+                        "media": {
+                            "markdown": "resources/walkthrough/install-python-windows-8.md"
+                        },
+                        "when": "workspacePlatform == windows && showInstallPythonTile"
                     },
                     {
                         "id": "python.installPythonMac",
-                        "title": "Install Python",
-                        "description": "The Python Extension requires Python to be installed. Install Python 3 through the terminal.\n[Open Terminal](command:workbench.action.terminal.new)\n",
+                        "title": "%walkthrough.step.python.installPythonMac.title%",
+                        "description": "%walkthrough.step.python.installPythonMac.description%",
                         "media": {
                             "markdown": "resources/walkthrough/install-python-macos.md"
                         },
-                        "when": "workspacePlatform == mac",
+                        "when": "workspacePlatform == mac && showInstallPythonTile",
                         "command": "workbench.action.terminal.new"
                     },
                     {
                         "id": "python.installPythonLinux",
-                        "title": "Install Python",
-                        "description": "The Python Extension requires Python to be installed. Install Python 3 through the terminal.\n[Open Terminal](command:workbench.action.terminal.new)\n",
+                        "title": "%walkthrough.step.python.installPythonLinux.title%",
+                        "description": "%walkthrough.step.python.installPythonLinux.description%",
                         "media": {
                             "markdown": "resources/walkthrough/install-python-linux.md"
                         },
-                        "when": "workspacePlatform == linux",
+                        "when": "workspacePlatform == linux && showInstallPythonTile",
                         "command": "workbench.action.terminal.new"
                     },
                     {
-                        "id": "python.selectInterpreter",
-                        "title": "Select a Python Interpreter",
-                        "description": "Choose which Python interpreter/environment you want to use for your Python project.\n[Select Python Interpreter](command:python.setInterpreter)\nTip: Reload the window if you installed Python but don't see it in the list (``Developer: Reload Window`` command in the [Command Palette](command:workbench.action.showCommands))",
+                        "id": "python.createEnvironment",
+                        "title": "%walkthrough.step.python.createEnvironment.title%",
+                        "description": "%walkthrough.step.python.createEnvironment.description%",
                         "media": {
-                            "altText": "selecting a python interpreter from the status bar",
-                            "image": {
-                                "dark": "resources/walkthrough/change-python-interpreter-dark.gif",
-                                "light": "resources/walkthrough/change-python-interpreter-light.gif",
-                                "hc": "resources/walkthrough/change-python-interpreter-hc.gif"
-                            }
-                        },
-                        "when": ""
+                            "svg": "resources/walkthrough/create-environment.svg",
+                            "altText": "%walkthrough.step.python.createEnvironment.altText%"
+                        }
                     },
                     {
                         "id": "python.runAndDebug",
-                        "title": "Run and debug your Python file",
-                        "description": "Open your Python file, press F5 and select 'Python File' to start running and debugging. \n[Learn more](https://code.visualstudio.com/docs/python/python-tutorial#_run-hello-world)",
+                        "title": "%walkthrough.step.python.runAndDebug.title%",
+                        "description": "%walkthrough.step.python.runAndDebug.description%",
                         "media": {
-                            "markdown": "resources/walkthrough/run-and-debug-python-file.md"
-                        },
-                        "when": "workspacePlatform != mac"
+                            "svg": "resources/walkthrough/rundebug2.svg",
+                            "altText": "%walkthrough.step.python.runAndDebug.altText%"
+                        }
                     },
                     {
-                        "id": "python.runAndDebugMacOS",
-                        "title": "Run and debug your Python file",
-                        "description": "Open your Python file, press F5 and select 'Python File' to start running and debugging. \n[Learn more](https://code.visualstudio.com/docs/python/python-tutorial#_run-hello-world)",
+                        "id": "python.learnMoreWithDS",
+                        "title": "%walkthrough.step.python.learnMoreWithDS.title%",
+                        "description": "%walkthrough.step.python.learnMoreWithDS.description%",
                         "media": {
-                            "markdown": "resources/walkthrough/run-and-debug-python-file-macOS.md"
-                        },
-                        "when": "workspacePlatform == mac"
-                    },
-                    {
-                        "id": "python.learnMore",
-                        "title": "Explore more resources",
-                        "description": "Take a look into our [documentation](https://aka.ms/AA8dxwy) to learn more about support for Python in VS Code. \n[Learn more](https://aka.ms/AA8dxwy)",
-                        "media": {
-                            "markdown": "resources/walkthrough/python-dev-learn-more.md"
-                        },
-                        "when": ""
+                            "altText": "%walkthrough.step.python.learnMoreWithDS.altText%",
+                            "svg": "resources/walkthrough/learnmore.svg"
+                        }
                     }
                 ]
             },
             {
                 "id": "pythonDataScienceWelcome",
-                "title": "Get started with Python for Data Science",
-                "description": "Your first steps to getting started with a Data Science project with Python!",
+                "title": "%walkthrough.pythonDataScienceWelcome.title%",
+                "description": "%walkthrough.pythonDataScienceWelcome.description%",
                 "when": "false",
                 "steps": [
                     {
-                        "id": "python.installPythonWinDS",
-                        "title": "Install Python",
-                        "description": "The Python Extension requires Python to be installed. Install Python from the [Microsoft Store](https://aka.ms/AAd9rms).\n\n[Install Python](https://aka.ms/AAd9rms)\n",
+                        "id": "python.installJupyterExt",
+                        "title": "%walkthrough.step.python.installJupyterExt.title%",
+                        "description": "%walkthrough.step.python.installJupyterExt.description%",
                         "media": {
-                            "markdown": "resources/walkthrough/install-python-windows.md"
-                        },
-                        "when": "workspacePlatform == windows"
-                    },
-                    {
-                        "id": "python.installPythonMacDS",
-                        "title": "Install Python",
-                        "description": "The Python Extension requires Python to be installed. Install Python 3 through the terminal.\n[Open Terminal](command:workbench.action.terminal.new)\n",
-                        "media": {
-                            "markdown": "resources/walkthrough/install-python-macos.md"
-                        },
-                        "when": "workspacePlatform == mac",
-                        "command": "workbench.action.terminal.new"
-                    },
-                    {
-                        "id": "python.installPythonLinuxDS",
-                        "title": "Install Python",
-                        "description": "The Python Extension requires Python to be installed. Install Python 3 through the terminal.\n[Open Terminal](command:workbench.action.terminal.new)\n",
-                        "media": {
-                            "markdown": "resources/walkthrough/install-python-linux.md"
-                        },
-                        "when": "workspacePlatform == linux",
-                        "command": "workbench.action.terminal.new"
-                    },
-                    {
-                        "id": "python.openFolderMac",
-                        "title": "Open an existing Python project",
-                        "description": "If you already have an existing Python project on your machine:\n[Open Folder](command:workbench.action.files.openFileFolder)\n \nIf you would like to clone a Python project from GitHub:\n[Clone a Git repository](command:git.clone)",
-                        "media": {
-                            "image": {
-                                "light": "resources/walkthrough/open-folder-light.png",
-                                "dark": "resources/walkthrough/open-folder-dark.png",
-                                "hc": "resources/walkthrough/open-folder-hc.png"
-                            },
-                            "altText": "Open a folder"
-                        },
-                        "completionEvents": [
-                            "onCommand:workbench.action.files.openFileFolder"
-                        ],
-                        "when": "workspacePlatform == mac && workspaceFolderCount == 0"
-                    },
-                    {
-                        "id": "python.openFolder",
-                        "title": "Open an existing Python project",
-                        "description": "To start, open a Python folder/project.\nIf you already have an existing Python project on your machine:\n[Open Folder](command:workbench.action.files.openFolder)\n \nIf you would like to clone a Python project from GitHub:\n[Clone a Git repository](command:git.clone)",
-                        "media": {
-                            "image": {
-                                "light": "resources/walkthrough/open-folder-light.png",
-                                "dark": "resources/walkthrough/open-folder-dark.png",
-                                "hc": "resources/walkthrough/open-folder-hc.png"
-                            },
-                            "altText": "Open a folder"
-                        },
-                        "completionEvents": [
-                            "onCommand:workbench.action.files.openFolder"
-                        ],
-                        "when": "workspacePlatform != mac && workspaceFolderCount == 0"
+                            "svg": "resources/walkthrough/data-science.svg",
+                            "altText": "%walkthrough.step.python.installJupyterExt.altText%"
+                        }
                     },
                     {
                         "id": "python.createNewNotebook",
-                        "title": "Create a new Jupyter Notebook",
-                        "description": "To create a new Jupyter Notebook, you can right click in the file explorer and create a new file with an .ipynb extension anytime.\n \nAlternatively, you can open the [Command Palette](command:workbench.action.showCommands) and run the command \n``Jupyter: Create New Blank Notebook``.\n[Create new Jupyter Notebook](command:toSide:jupyter.createnewnotebook)",
+                        "title": "%walkthrough.step.python.createNewNotebook.title%",
+                        "description": "%walkthrough.step.python.createNewNotebook.description%",
                         "media": {
-                            "image": {
-                                "light": "resources/walkthrough/new-notebook-light.png",
-                                "dark": "resources/walkthrough/new-notebook-dark.png",
-                                "hc": "resources/walkthrough/new-notebook-hc.png"
-                            },
-                            "altText": "Creating a new Jupyter notebook"
+                            "svg": "resources/walkthrough/create-notebook.svg",
+                            "altText": "%walkthrough.step.python.createNewNotebook.altText%"
                         },
                         "completionEvents": [
-                            "onCommand:jupyter.createnewnotebook"
+                            "onCommand:jupyter.createnewnotebook",
+                            "onCommand:workbench.action.files.openFolder",
+                            "onCommand:workbench.action.files.openFileFolder"
                         ]
                     },
                     {
                         "id": "python.openInteractiveWindow",
-                        "title": "Open the Python Interactive Window",
-                        "description": "The Python Interactive Window is a Python shell where you can execute and view the results of your Python code. You can create cells on a Python file by typing ``#%%``.\n \nTo open the interactive window anytime, open the [Command Palette](command:workbench.action.showCommands) and run the command \n``Jupyter: Create Interactive Window``.\n[Open Interactive Window](command:toSide:jupyter.createnewinteractive)",
+                        "title": "%walkthrough.step.python.openInteractiveWindow.title%",
+                        "description": "%walkthrough.step.python.openInteractiveWindow.description%",
                         "media": {
-                            "image": {
-                                "dark": "resources/walkthrough/interactive-window-dark.png",
-                                "light": "resources/walkthrough/interactive-window-light.png",
-                                "hc": "resources/walkthrough/interactive-window-hc.png"
-                            },
-                            "altText": "Opening python interactive window"
+                            "svg": "resources/walkthrough/interactive-window.svg",
+                            "altText": "%walkthrough.step.python.openInteractiveWindow.altText%"
                         },
                         "completionEvents": [
                             "onCommand:jupyter.createnewinteractive"
@@ -277,10 +231,11 @@
                     },
                     {
                         "id": "python.dataScienceLearnMore",
-                        "title": "Find out more!",
-                        "description": "Take a look into our [documentation](https://aka.ms/AAdar6q) to learn more about Python for Data Science in VS Code. \n[Learn more](https://aka.ms/AAdar6q)",
+                        "title": "%walkthrough.step.python.dataScienceLearnMore.title%",
+                        "description": "%walkthrough.step.python.dataScienceLearnMore.description%",
                         "media": {
-                            "markdown": "resources/walkthrough/python-datascience-learn-more.md"
+                            "svg": "resources/walkthrough/learnmore.svg",
+                            "altText": "%walkthrough.step.python.dataScienceLearnMore.altText%"
                         }
                     }
                 ]
@@ -295,13 +250,20 @@
             },
             {
                 "language": "python"
+            },
+            {
+                "language": "django-html"
+            },
+            {
+                "language": "django-txt"
             }
         ],
         "commands": [
             {
+                "title": "%python.command.python.createNewFile.title%",
+                "shortTitle": "%python.menu.createNewFile.title%",
                 "category": "Python",
-                "command": "python.analysis.clearCache",
-                "title": "%python.command.python.analysis.clearCache.title%"
+                "command": "python.createNewFile"
             },
             {
                 "category": "Python",
@@ -310,13 +272,8 @@
             },
             {
                 "category": "Python",
-                "command": "python.buildWorkspaceSymbols",
-                "title": "%python.command.python.buildWorkspaceSymbols.title%"
-            },
-            {
-                "category": "Python",
-                "command": "python.clearPersistentStorage",
-                "title": "%python.command.python.clearPersistentStorage.title%"
+                "command": "python.clearCacheAndReload",
+                "title": "%python.command.python.clearCacheAndReload.title%"
             },
             {
                 "category": "Python",
@@ -335,13 +292,13 @@
             },
             {
                 "category": "Python",
-                "command": "python.enableLinting",
-                "title": "%python.command.python.enableLinting.title%"
+                "command": "python.createEnvironment",
+                "title": "%python.command.python.createEnvironment.title%"
             },
             {
                 "category": "Python",
-                "command": "python.enableSourceMapSupport",
-                "title": "%python.command.python.enableSourceMapSupport.title%"
+                "command": "python.createEnvironment-button",
+                "title": "%python.command.python.createEnvironment.title%"
             },
             {
                 "category": "Python",
@@ -352,13 +309,13 @@
                 "category": "Python",
                 "command": "python.execInTerminal-icon",
                 "icon": "$(play)",
-                "title": "%python.command.python.execInTerminal.title%"
+                "title": "%python.command.python.execInTerminalIcon.title%"
             },
             {
                 "category": "Python",
-                "command": "python.debugInTerminal",
-                "icon": "$(debug-alt)",
-                "title": "%python.command.python.debugInTerminal.title%"
+                "command": "python.execInDedicatedTerminal",
+                "icon": "$(play)",
+                "title": "%python.command.python.execInDedicatedTerminal.title%"
             },
             {
                 "category": "Python",
@@ -372,51 +329,8 @@
             },
             {
                 "category": "Python",
-                "command": "python.goToPythonObject",
-                "title": "%python.command.python.goToPythonObject.title%"
-            },
-            {
-                "category": "Python",
-                "command": "python.launchTensorBoard",
-                "title": "%python.command.python.launchTensorBoard.title%"
-            },
-            {
-                "category": "Python Refactor",
-                "command": "python.refactorExtractMethod",
-                "title": "%python.command.python.refactorExtractMethod.title%"
-            },
-            {
-                "category": "Python Refactor",
-                "command": "python.refactorExtractVariable",
-                "title": "%python.command.python.refactorExtractVariable.title%"
-            },
-            {
-                "category": "Python",
-                "command": "python.refreshTensorBoard",
-                "enablement": "python.hasActiveTensorBoardSession",
-                "icon": "$(refresh)",
-                "title": "%python.command.python.refreshTensorBoard.title%"
-            },
-            {
-                "category": "Test",
-                "command": "python.refreshTests",
-                "icon": "$(refresh)",
-                "title": "%python.command.python.refreshTests.title%"
-            },
-            {
-                "category": "Test",
-                "command": "python.refreshingTests",
-                "icon": {
-                    "dark": "resources/dark/discovering-tests.svg",
-                    "light": "resources/light/discovering-tests.svg"
-                },
-                "title": "%python.command.python.refreshingTests.title%"
-            },
-            {
-                "category": "Test",
-                "command": "python.stopRefreshingTests",
-                "icon": "$(stop-circle)",
-                "title": "%python.command.python.stopRefreshingTests.title%"
+                "command": "python.execInREPL",
+                "title": "%python.command.python.execInREPL.title%"
             },
             {
                 "category": "Python",
@@ -431,43 +345,18 @@
             },
             {
                 "category": "Python",
-                "command": "python.runLinting",
-                "title": "%python.command.python.runLinting.title%"
-            },
-            {
-                "category": "Python",
                 "command": "python.setInterpreter",
                 "title": "%python.command.python.setInterpreter.title%"
             },
             {
                 "category": "Python",
-                "command": "python.setLinter",
-                "title": "%python.command.python.setLinter.title%"
-            },
-            {
-                "category": "Python Refactor",
-                "command": "python.sortImports",
-                "title": "%python.command.python.sortImports.title%"
-            },
-            {
-                "category": "Python",
                 "command": "python.startREPL",
-                "title": "%python.command.python.startREPL.title%"
+                "title": "%python.command.python.startTerminalREPL.title%"
             },
             {
                 "category": "Python",
-                "command": "python.switchOffInsidersChannel",
-                "title": "%python.command.python.switchOffInsidersChannel.title%"
-            },
-            {
-                "category": "Python",
-                "command": "python.switchToDailyChannel",
-                "title": "%python.command.python.switchToDailyChannel.title%"
-            },
-            {
-                "category": "Python",
-                "command": "python.switchToWeeklyChannel",
-                "title": "%python.command.python.switchToWeeklyChannel.title%"
+                "command": "python.startNativeREPL",
+                "title": "%python.command.python.startNativeREPL.title%"
             },
             {
                 "category": "Python",
@@ -483,276 +372,135 @@
                     "light": "resources/light/repl.svg"
                 },
                 "title": "%python.command.python.viewOutput.title%"
+            },
+            {
+                "category": "Python",
+                "command": "python.installJupyter",
+                "title": "%python.command.python.installJupyter.title%"
             }
         ],
         "configuration": {
             "properties": {
-                "python.analysis.cacheFolderPath": {
-                    "description": "Path to a writable folder where analyzer can cache its data. Change requires restart.",
-                    "scope": "resource",
+                "python.activeStateToolPath": {
+                    "default": "state",
+                    "description": "%python.activeStateToolPath.description%",
+                    "scope": "machine-overridable",
                     "type": "string"
-                },
-                "python.analysis.diagnosticPublishDelay": {
-                    "default": 1000,
-                    "description": "Delay before diagnostic messages are transferred to the problems list (in milliseconds).",
-                    "scope": "resource",
-                    "type": "integer"
-                },
-                "python.analysis.disabled": {
-                    "default": [],
-                    "description": "List of suppressed diagnostic messages.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.analysis.errors": {
-                    "default": [],
-                    "description": "List of diagnostics messages to be shown as errors.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.analysis.information": {
-                    "default": [],
-                    "description": "List of diagnostics messages to be shown as information.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.analysis.logLevel": {
-                    "default": "Error",
-                    "description": "Defines type of log messages language server writes into the output window.",
-                    "enum": [
-                        "Error",
-                        "Information",
-                        "Trace",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.analysis.memory.keepLibraryAst": {
-                    "default": false,
-                    "description": "Allows code analysis to keep parser trees in memory. Increases memory consumption but may improve performance with large library analysis.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.analysis.symbolsHierarchyDepthLimit": {
-                    "default": 10,
-                    "description": "Limits depth of the symbol tree in the document outline.",
-                    "scope": "resource",
-                    "type": "integer"
-                },
-                "python.analysis.typeshedPaths": {
-                    "default": [],
-                    "description": "Paths to Typeshed stub folders. Default is Typeshed installed with the language server. Change requires restart.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.analysis.warnings": {
-                    "default": [],
-                    "description": "List of diagnostics messages to be shown as warnings.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.autoComplete.addBrackets": {
-                    "default": false,
-                    "description": "Automatically add brackets for functions.",
-                    "scope": "resource",
-                    "type": "boolean"
                 },
                 "python.autoComplete.extraPaths": {
                     "default": [],
-                    "description": "List of paths to libraries and the like that need to be imported by auto complete engine. E.g. when using Google App SDK, the paths are not in system path, hence need to be added into this list.",
+                    "description": "%python.autoComplete.extraPaths.description%",
                     "scope": "resource",
-                    "type": "array"
+                    "type": "array",
+                    "uniqueItems": true
                 },
-                "python.autoComplete.showAdvancedMembers": {
-                    "default": true,
-                    "description": "Controls appearance of methods with double underscores in the completion list.",
-                    "scope": "resource",
-                    "type": "boolean"
+                "python.createEnvironment.contentButton": {
+                    "default": "hide",
+                    "markdownDescription": "%python.createEnvironment.contentButton.description%",
+                    "scope": "machine-overridable",
+                    "type": "string",
+                    "enum": [
+                        "show",
+                        "hide"
+                    ]
                 },
-                "python.autoComplete.typeshedPaths": {
-                    "default": [],
-                    "description": "Specifies paths to local typeshed repository clone(s) for the Python language server.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.autoUpdateLanguageServer": {
-                    "default": true,
-                    "description": "Automatically update the language server.",
-                    "scope": "application",
-                    "type": "boolean"
+                "python.createEnvironment.trigger": {
+                    "default": "prompt",
+                    "markdownDescription": "%python.createEnvironment.trigger.description%",
+                    "scope": "machine-overridable",
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "prompt"
+                    ]
                 },
                 "python.condaPath": {
                     "default": "",
-                    "description": "Path to the conda executable to use for activation (version 4.4+).",
-                    "scope": "resource",
+                    "description": "%python.condaPath.description%",
+                    "scope": "machine",
                     "type": "string"
                 },
                 "python.defaultInterpreterPath": {
                     "default": "python",
-                    "description": "Path to Python, you can use a custom version of Python by modifying this setting to include the full path. This default setting is used as a fallback if no interpreter is selected for the workspace. The extension will also not set nor change the value of this setting, it will only read from it.",
-                    "scope": "resource",
+                    "markdownDescription": "%python.defaultInterpreterPath.description%",
+                    "scope": "machine-overridable",
                     "type": "string"
-                },
-                "python.diagnostics.sourceMapsEnabled": {
-                    "default": false,
-                    "description": "Enable source map support for meaningful stack traces in error logs.",
-                    "scope": "application",
-                    "type": "boolean"
-                },
-                "python.disableInstallationCheck": {
-                    "default": false,
-                    "description": "Whether to check if Python is installed (also warn when using the macOS-installed Python).",
-                    "scope": "resource",
-                    "type": "boolean"
                 },
                 "python.envFile": {
                     "default": "${workspaceFolder}/.env",
-                    "description": "Absolute path to a file containing environment variable definitions.",
+                    "description": "%python.envFile.description%",
                     "scope": "resource",
                     "type": "string"
                 },
                 "python.experiments.enabled": {
                     "default": true,
-                    "description": "Enables/disables A/B tests.",
-                    "scope": "machine",
+                    "description": "%python.experiments.enabled.description%",
+                    "scope": "window",
                     "type": "boolean"
                 },
                 "python.experiments.optInto": {
                     "default": [],
-                    "description": "List of experiment to opt into. If empty, user is assigned the default experiment groups. See https://github.com/microsoft/vscode-python/wiki/Experiments for more details.",
+                    "markdownDescription": "%python.experiments.optInto.description%",
                     "items": {
                         "enum": [
                             "All",
-                            "pythonDeprecatePythonPath",
-                            "pythonDiscoveryModule",
-                            "pythonDiscoveryModuleWithoutWatcher",
-                            "pythonSortEnvs",
                             "pythonSurveyNotification",
-                            "pythonTensorboardExperiment",
-                            "pythonRunFailedTestsButtonDisplayed",
-                            "pythonRefreshTestsButtonDisplayed",
-                            "pythonRememberDebugConfig"
+                            "pythonPromptNewToolsExt",
+                            "pythonTerminalEnvVarActivation",
+                            "pythonDiscoveryUsingWorkers",
+                            "pythonTestAdapter",
+                            "pythonREPLSmartSend"
+                        ],
+                        "enumDescriptions": [
+                            "%python.experiments.All.description%",
+                            "%python.experiments.pythonSurveyNotification.description%",
+                            "%python.experiments.pythonPromptNewToolsExt.description%",
+                            "%python.experiments.pythonTerminalEnvVarActivation.description%",
+                            "%python.experiments.pythonDiscoveryUsingWorkers.description%",
+                            "%python.experiments.pythonTestAdapter.description%",
+                            "%python.experiments.pythonREPLSmartSend.description%"
                         ]
                     },
-                    "scope": "machine",
-                    "type": "array"
+                    "scope": "window",
+                    "type": "array",
+                    "uniqueItems": true
                 },
                 "python.experiments.optOutFrom": {
                     "default": [],
-                    "description": "List of experiment to opt out of. If empty, user is assigned the default experiment groups. See https://github.com/microsoft/vscode-python/wiki/Experiments for more details.",
+                    "markdownDescription": "%python.experiments.optOutFrom.description%",
                     "items": {
                         "enum": [
                             "All",
-                            "pythonDeprecatePythonPath",
-                            "pythonDiscoveryModule",
-                            "pythonDiscoveryModuleWithoutWatcher",
-                            "pythonSortEnvs",
                             "pythonSurveyNotification",
-                            "pythonTensorboardExperiment",
-                            "pythonRunFailedTestsButtonDisplayed",
-                            "pythonRefreshTestsButtonDisplayed",
-                            "pythonRememberDebugConfig"
+                            "pythonPromptNewToolsExt",
+                            "pythonTerminalEnvVarActivation",
+                            "pythonDiscoveryUsingWorkers",
+                            "pythonTestAdapter",
+                            "pythonREPLSmartSend"
+                        ],
+                        "enumDescriptions": [
+                            "%python.experiments.All.description%",
+                            "%python.experiments.pythonSurveyNotification.description%",
+                            "%python.experiments.pythonPromptNewToolsExt.description%",
+                            "%python.experiments.pythonTerminalEnvVarActivation.description%",
+                            "%python.experiments.pythonDiscoveryUsingWorkers.description%",
+                            "%python.experiments.pythonTestAdapter.description%",
+                            "%python.experiments.pythonREPLSmartSend.description%"
                         ]
                     },
-                    "scope": "machine",
-                    "type": "array"
-                },
-                "python.formatting.autopep8Args": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.formatting.autopep8Path": {
-                    "default": "autopep8",
-                    "description": "Path to autopep8, you can use a custom version of autopep8 by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.formatting.blackArgs": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.formatting.blackPath": {
-                    "default": "black",
-                    "description": "Path to Black, you can use a custom version of Black by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.formatting.provider": {
-                    "default": "autopep8",
-                    "description": "Provider for formatting. Possible options include 'autopep8', 'black', and 'yapf'.",
-                    "enum": [
-                        "autopep8",
-                        "black",
-                        "none",
-                        "yapf"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.formatting.yapfArgs": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.formatting.yapfPath": {
-                    "default": "yapf",
-                    "description": "Path to yapf, you can use a custom version of yapf by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
+                    "scope": "window",
+                    "type": "array",
+                    "uniqueItems": true
                 },
                 "python.globalModuleInstallation": {
                     "default": false,
-                    "description": "Whether to install Python modules globally when not using an environment.",
+                    "description": "%python.globalModuleInstallation.description%",
                     "scope": "resource",
                     "type": "boolean"
                 },
-                "python.insidersChannel": {
-                    "default": "off",
-                    "description": "Set to \"weekly\" or \"daily\" to automatically download and install the latest Insiders builds of the python extension, which include upcoming features and bug fixes.",
-                    "enum": [
-                        "daily",
-                        "off",
-                        "weekly"
-                    ],
-                    "scope": "application",
-                    "type": "string"
-                },
                 "python.languageServer": {
                     "default": "Default",
-                    "description": "Defines type of the language server.",
+                    "description": "%python.languageServer.description%",
                     "enum": [
                         "Default",
                         "Jedi",
@@ -760,369 +508,34 @@
                         "None"
                     ],
                     "enumDescriptions": [
-                        "Automatically select a language server: Pylance if installed and available, otherwise fallback to Jedi.",
-                        "Use Jedi behind the Language Server Protocol (LSP) as a language server.",
-                        "Use Pylance as a language server.",
-                        "Disable language server capabilities."
+                        "%python.languageServer.defaultDescription%",
+                        "%python.languageServer.jediDescription%",
+                        "%python.languageServer.pylanceDescription%",
+                        "%python.languageServer.noneDescription%"
                     ],
                     "scope": "window",
                     "type": "string"
                 },
-                "python.linting.banditArgs": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.linting.banditEnabled": {
-                    "default": false,
-                    "description": "Whether to lint Python files using bandit.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.banditPath": {
-                    "default": "bandit",
-                    "description": "Path to bandit, you can use a custom version of bandit by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.cwd": {
-                    "default": null,
-                    "description": "Optional working directory for linters.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.enabled": {
-                    "default": true,
-                    "description": "Whether to lint Python files.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.flake8Args": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.linting.flake8CategorySeverity.E": {
-                    "default": "Error",
-                    "description": "Severity of Flake8 message type 'E'.",
+                "python.interpreter.infoVisibility": {
+                    "default": "onPythonRelated",
+                    "description": "%python.interpreter.infoVisibility.description%",
                     "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
+                        "never",
+                        "onPythonRelated",
+                        "always"
                     ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.flake8CategorySeverity.F": {
-                    "default": "Error",
-                    "description": "Severity of Flake8 message type 'F'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
+                    "enumDescriptions": [
+                        "%python.interpreter.infoVisibility.never.description%",
+                        "%python.interpreter.infoVisibility.onPythonRelated.description%",
+                        "%python.interpreter.infoVisibility.always.description%"
                     ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.flake8CategorySeverity.W": {
-                    "default": "Warning",
-                    "description": "Severity of Flake8 message type 'W'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.flake8Enabled": {
-                    "default": false,
-                    "description": "Whether to lint Python files using flake8",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.flake8Path": {
-                    "default": "flake8",
-                    "description": "Path to flake8, you can use a custom version of flake8 by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.ignorePatterns": {
-                    "default": [
-                        "**/site-packages/**/*.py",
-                        ".vscode/*.py"
-                    ],
-                    "description": "Patterns used to exclude files or folders from being linted.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.linting.lintOnSave": {
-                    "default": true,
-                    "description": "Whether to lint Python files when saved.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.maxNumberOfProblems": {
-                    "default": 100,
-                    "description": "Controls the maximum number of problems produced by the server.",
-                    "scope": "resource",
-                    "type": "number"
-                },
-                "python.linting.mypyArgs": {
-                    "default": [
-                        "--follow-imports=silent",
-                        "--ignore-missing-imports",
-                        "--show-column-numbers"
-                    ],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.linting.mypyCategorySeverity.error": {
-                    "default": "Error",
-                    "description": "Severity of Mypy message type 'Error'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.mypyCategorySeverity.note": {
-                    "default": "Information",
-                    "description": "Severity of Mypy message type 'Note'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.mypyEnabled": {
-                    "default": false,
-                    "description": "Whether to lint Python files using mypy.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.mypyPath": {
-                    "default": "mypy",
-                    "description": "Path to mypy, you can use a custom version of mypy by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.prospectorArgs": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.linting.prospectorEnabled": {
-                    "default": false,
-                    "description": "Whether to lint Python files using prospector.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.prospectorPath": {
-                    "default": "prospector",
-                    "description": "Path to Prospector, you can use a custom version of prospector by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pycodestyleArgs": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.linting.pycodestyleCategorySeverity.E": {
-                    "default": "Error",
-                    "description": "Severity of pycodestyle message type 'E'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pycodestyleCategorySeverity.W": {
-                    "default": "Warning",
-                    "description": "Severity of pycodestyle message type 'W'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pycodestyleEnabled": {
-                    "default": false,
-                    "description": "Whether to lint Python files using pycodestyle",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.pycodestylePath": {
-                    "default": "pycodestyle",
-                    "description": "Path to pycodestyle, you can use a custom version of pycodestyle by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pydocstyleArgs": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.linting.pydocstyleEnabled": {
-                    "default": false,
-                    "description": "Whether to lint Python files using pydocstyle",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.pydocstylePath": {
-                    "default": "pydocstyle",
-                    "description": "Path to pydocstyle, you can use a custom version of pydocstyle by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pylamaArgs": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.linting.pylamaEnabled": {
-                    "default": false,
-                    "description": "Whether to lint Python files using pylama.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.pylamaPath": {
-                    "default": "pylama",
-                    "description": "Path to pylama, you can use a custom version of pylama by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pylintArgs": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.linting.pylintCategorySeverity.convention": {
-                    "default": "Information",
-                    "description": "Severity of Pylint message type 'Convention/C'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pylintCategorySeverity.error": {
-                    "default": "Error",
-                    "description": "Severity of Pylint message type 'Error/E'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pylintCategorySeverity.fatal": {
-                    "default": "Error",
-                    "description": "Severity of Pylint message type 'Fatal/F'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pylintCategorySeverity.refactor": {
-                    "default": "Hint",
-                    "description": "Severity of Pylint message type 'Refactor/R'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pylintCategorySeverity.warning": {
-                    "default": "Warning",
-                    "description": "Severity of Pylint message type 'Warning/W'.",
-                    "enum": [
-                        "Error",
-                        "Hint",
-                        "Information",
-                        "Warning"
-                    ],
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.linting.pylintEnabled": {
-                    "default": false,
-                    "description": "Whether to lint Python files using pylint.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.linting.pylintPath": {
-                    "default": "pylint",
-                    "description": "Path to Pylint, you can use a custom version of pylint by modifying this setting to include the full path.",
-                    "scope": "resource",
+                    "scope": "machine",
                     "type": "string"
                 },
                 "python.logging.level": {
                     "default": "error",
-                    "description": "The logging level the extension logs at, defaults to 'error'",
+                    "deprecationMessage": "%python.logging.level.deprecation%",
+                    "description": "%python.logging.level.description%",
                     "enum": [
                         "debug",
                         "error",
@@ -1133,95 +546,138 @@
                     "scope": "machine",
                     "type": "string"
                 },
+                "python.missingPackage.severity": {
+                    "default": "Hint",
+                    "description": "%python.missingPackage.severity.description%",
+                    "enum": [
+                        "Error",
+                        "Hint",
+                        "Information",
+                        "Warning"
+                    ],
+                    "scope": "resource",
+                    "type": "string"
+                },
+                "python.locator": {
+                    "default": "js",
+                    "description": "%python.locator.description%",
+                    "enum": [
+                        "js",
+                        "native"
+                    ],
+                    "tags": [
+                        "onExP",
+                        "preview"
+                    ],
+                    "scope": "machine",
+                    "type": "string"
+                },
                 "python.pipenvPath": {
                     "default": "pipenv",
-                    "description": "Path to the pipenv executable to use for activation.",
-                    "scope": "resource",
+                    "description": "%python.pipenvPath.description%",
+                    "scope": "machine-overridable",
                     "type": "string"
                 },
                 "python.poetryPath": {
                     "default": "poetry",
-                    "description": "Path to the poetry executable.",
-                    "scope": "resource",
+                    "description": "%python.poetryPath.description%",
+                    "scope": "machine-overridable",
                     "type": "string"
                 },
-                "python.pythonPath": {
-                    "default": "python",
-                    "description": "(DEPRECATED: Note this setting is not used when in pythonDeprecatePythonPath experiment) Path to Python, you can use a custom version of Python by modifying this setting to include the full path.",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.sortImports.args": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.sortImports.path": {
-                    "default": "",
-                    "description": "Path to isort script, default using inner version",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.tensorBoard.logDirectory": {
-                    "description": "Set this setting to your preferred TensorBoard log directory to skip log directory prompt when starting TensorBoard.",
-                    "scope": "application",
+                "python.pixiToolPath": {
+                    "default": "pixi",
+                    "description": "%python.pixiToolPath.description%",
+                    "scope": "machine-overridable",
                     "type": "string"
                 },
                 "python.terminal.activateEnvInCurrentTerminal": {
                     "default": false,
-                    "description": "Activate Python Environment in the current Terminal on load of the Extension.",
+                    "description": "%python.terminal.activateEnvInCurrentTerminal.description%",
                     "scope": "resource",
                     "type": "boolean"
                 },
                 "python.terminal.activateEnvironment": {
                     "default": true,
-                    "description": "Activate Python Environment in Terminal created using the Extension.",
+                    "description": "%python.terminal.activateEnvironment.description%",
                     "scope": "resource",
                     "type": "boolean"
                 },
                 "python.terminal.executeInFileDir": {
                     "default": false,
-                    "description": "When executing a file in the terminal, whether to use execute in the file's directory, instead of the current open folder.",
+                    "description": "%python.terminal.executeInFileDir.description%",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "python.terminal.focusAfterLaunch": {
+                    "default": false,
+                    "description": "%python.terminal.focusAfterLaunch.description%",
                     "scope": "resource",
                     "type": "boolean"
                 },
                 "python.terminal.launchArgs": {
                     "default": [],
-                    "description": "Python launch arguments to use when executing a file in the terminal.",
+                    "description": "%python.terminal.launchArgs.description%",
                     "scope": "resource",
                     "type": "array"
                 },
+                "python.terminal.shellIntegration.enabled": {
+                    "default": false,
+                    "markdownDescription": "%python.terminal.shellIntegration.enabled.description%",
+                    "scope": "resource",
+                    "type": "boolean",
+                    "tags": [
+                        "preview"
+                    ]
+                },
+                "python.REPL.enableREPLSmartSend": {
+                    "default": true,
+                    "description": "%python.EnableREPLSmartSend.description%",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
+                "python.REPL.sendToNativeREPL": {
+                    "default": false,
+                    "description": "%python.REPL.sendToNativeREPL.description%",
+                    "scope": "resource",
+                    "type": "boolean",
+                    "tags": [
+                        "onExP",
+                        "preview"
+                    ]
+                },
+                "python.REPL.provideVariables": {
+                    "default": true,
+                    "description": "%python.REPL.provideVariables.description%",
+                    "scope": "resource",
+                    "type": "boolean"
+                },
                 "python.testing.autoTestDiscoverOnSaveEnabled": {
                     "default": true,
-                    "description": "Enable auto run test discovery when saving a test file.",
+                    "description": "%python.testing.autoTestDiscoverOnSaveEnabled.description%",
                     "scope": "resource",
                     "type": "boolean"
                 },
                 "python.testing.cwd": {
                     "default": null,
-                    "description": "Optional working directory for tests.",
+                    "description": "%python.testing.cwd.description%",
                     "scope": "resource",
                     "type": "string"
                 },
                 "python.testing.debugPort": {
                     "default": 3000,
-                    "description": "Port number used for debugging of tests.",
+                    "description": "%python.testing.debugPort.description%",
                     "scope": "resource",
                     "type": "number"
                 },
                 "python.testing.promptToConfigure": {
                     "default": true,
-                    "description": "Prompt to configure a test framework if potential tests directories are discovered.",
+                    "description": "%python.testing.promptToConfigure.description%",
                     "scope": "resource",
                     "type": "boolean"
                 },
                 "python.testing.pytestArgs": {
                     "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
+                    "description": "%python.testing.pytestArgs.description%",
                     "items": {
                         "type": "string"
                     },
@@ -1230,14 +686,14 @@
                 },
                 "python.testing.pytestEnabled": {
                     "default": false,
-                    "description": "Enable testing using pytest.",
+                    "description": "%python.testing.pytestEnabled.description%",
                     "scope": "resource",
                     "type": "boolean"
                 },
                 "python.testing.pytestPath": {
                     "default": "pytest",
-                    "description": "Path to pytest (pytest), you can use a custom version of pytest by modifying this setting to include the full path.",
-                    "scope": "resource",
+                    "description": "%python.testing.pytestPath.description%",
+                    "scope": "machine-overridable",
                     "type": "string"
                 },
                 "python.testing.unittestArgs": {
@@ -1248,7 +704,7 @@
                         "-p",
                         "*test*.py"
                     ],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
+                    "description": "%python.testing.unittestArgs.description%",
                     "items": {
                         "type": "string"
                     },
@@ -1257,64 +713,24 @@
                 },
                 "python.testing.unittestEnabled": {
                     "default": false,
-                    "description": "Enable testing using unittest.",
+                    "description": "%python.testing.unittestEnabled.description%",
                     "scope": "resource",
                     "type": "boolean"
                 },
                 "python.venvFolders": {
                     "default": [],
-                    "description": "Folders in your home directory to look into for virtual environments (supports pyenv, direnv and virtualenvwrapper by default).",
+                    "description": "%python.venvFolders.description%",
                     "items": {
                         "type": "string"
                     },
                     "scope": "machine",
-                    "type": "array"
+                    "type": "array",
+                    "uniqueItems": true
                 },
                 "python.venvPath": {
                     "default": "",
-                    "description": "Path to folder with a list of Virtual Environments (e.g. ~/.pyenv, ~/Envs, ~/.virtualenvs).",
+                    "description": "%python.venvPath.description%",
                     "scope": "machine",
-                    "type": "string"
-                },
-                "python.workspaceSymbols.ctagsPath": {
-                    "default": "ctags",
-                    "description": "Fully qualified path to the ctags executable (else leave as ctags, assuming it is in current path).",
-                    "scope": "resource",
-                    "type": "string"
-                },
-                "python.workspaceSymbols.enabled": {
-                    "default": false,
-                    "description": "Set to 'true' to enable ctags to provide Workspace Symbols.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.workspaceSymbols.exclusionPatterns": {
-                    "default": [
-                        "**/site-packages/**"
-                    ],
-                    "description": "Pattern used to exclude files and folders from ctags See http://ctags.sourceforge.net/ctags.html.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "python.workspaceSymbols.rebuildOnFileSave": {
-                    "default": true,
-                    "description": "Whether to re-build the tags file on when changes made to python files are saved.",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.workspaceSymbols.rebuildOnStart": {
-                    "default": true,
-                    "description": "Whether to re-build the tags file on start (defaults to true).",
-                    "scope": "resource",
-                    "type": "boolean"
-                },
-                "python.workspaceSymbols.tagFilePath": {
-                    "default": "${workspaceFolder}/.vscode/tags",
-                    "description": "Fully qualified path to tag file (exuberant ctag file), used to provide workspace symbols.",
-                    "scope": "resource",
                     "type": "string"
                 }
             },
@@ -1369,7 +785,7 @@
                             },
                             "justMyCode": {
                                 "default": true,
-                                "description": "Debug only user-written code.",
+                                "description": "If true, show and debug only user-written code. If false, show and debug all code, including library calls.",
                                 "type": "boolean"
                             },
                             "listen": {
@@ -1460,11 +876,14 @@
                         "properties": {
                             "args": {
                                 "default": [],
-                                "description": "Command line arguments passed to the program",
+                                "description": "Command line arguments passed to the program.",
                                 "items": {
                                     "type": "string"
                                 },
-                                "type": "array"
+                                "type": [
+                                    "array",
+                                    "string"
+                                ]
                             },
                             "autoReload": {
                                 "default": {},
@@ -1511,6 +930,10 @@
                                     "integratedTerminal",
                                     "internalConsole"
                                 ]
+                            },
+                            "consoleTitle": {
+                                "default": "Python Debug Console",
+                                "description": "Display name of the debug console or terminal"
                             },
                             "cwd": {
                                 "default": "${workspaceFolder}",
@@ -1669,6 +1092,7 @@
                         }
                     }
                 },
+                "deprecated": "%python.debugger.deprecatedMessage%",
                 "configurationSnippets": [],
                 "label": "Python",
                 "languages": [
@@ -1677,7 +1101,9 @@
                 "type": "python",
                 "variables": {
                     "pickProcess": "python.pickLocalProcess"
-                }
+                },
+                "when": "!virtualWorkspace && shellExecutionSupported",
+                "hiddenWhen": "true"
             }
         ],
         "grammars": [
@@ -1705,13 +1131,22 @@
             {
                 "command": "python.execSelectionInTerminal",
                 "key": "shift+enter",
-                "when": "editorTextFocus && editorLangId == python && !findInputFocussed && !replaceInputFocussed && !jupyter.ownsSelection && !notebookEditorFocused"
+                "when": "editorTextFocus && editorLangId == python && !findInputFocussed && !replaceInputFocussed && !jupyter.ownsSelection && !notebookEditorFocused && !isCompositeNotebook"
             },
             {
-                "command": "python.refreshTensorBoard",
-                "key": "ctrl+r",
-                "mac": "cmd+r",
-                "when": "python.hasActiveTensorBoardSession"
+                "command": "python.execInREPL",
+                "key": "shift+enter",
+                "when": "config.python.REPL.sendToNativeREPL && editorLangId == python && editorTextFocus && !jupyter.ownsSelection && !notebookEditorFocused && !isCompositeNotebook"
+            },
+            {
+                "command": "python.execInREPLEnter",
+                "key": "enter",
+                "when": "!config.interactiveWindow.executeWithShiftEnter && isCompositeNotebook && activeEditor == 'workbench.editor.repl' && !inlineChatFocused && !notebookCellListFocused"
+            },
+            {
+                "command": "python.execInInteractiveWindowEnter",
+                "key": "enter",
+                "when": "!config.interactiveWindow.executeWithShiftEnter && isCompositeNotebook && activeEditor == 'workbench.editor.interactive' && !inlineChatFocused && !notebookCellListFocused"
             }
         ],
         "languages": [
@@ -1732,12 +1167,10 @@
                 ],
                 "configuration": "./languages/pip-requirements.json",
                 "filenamePatterns": [
-                    "*-constraints.txt",
-                    "*-requirements.in",
-                    "*-requirements.txt",
-                    "constraints-*.txt",
-                    "requirements-*.in",
-                    "requirements-*.txt"
+                    "**/*requirements*.{txt, in}",
+                    "**/*constraints*.txt",
+                    "**/requirements/*.{txt,in}",
+                    "**/constraints/*.txt"
                 ],
                 "filenames": [
                     "constraints.txt",
@@ -1764,7 +1197,8 @@
             {
                 "filenames": [
                     "Pipfile",
-                    "poetry.lock"
+                    "poetry.lock",
+                    "uv.lock"
                 ],
                 "id": "toml"
             },
@@ -1776,130 +1210,242 @@
             }
         ],
         "menus": {
+            "issue/reporter": [
+                {
+                    "command": "python.reportIssue"
+                }
+            ],
             "commandPalette": [
                 {
                     "category": "Python",
+                    "command": "python.analysis.restartLanguageServer",
+                    "title": "%python.command.python.analysis.restartLanguageServer.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported && (editorLangId == python || notebookType == jupyter-notebook)"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.clearCacheAndReload",
+                    "title": "%python.command.python.clearCacheAndReload.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
+                },
+                {
+                    "category": "Python",
                     "command": "python.clearWorkspaceInterpreter",
-                    "title": "%python.command.python.clearWorkspaceInterpreter.title%"
+                    "title": "%python.command.python.clearWorkspaceInterpreter.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
                 },
                 {
                     "category": "Python",
-                    "command": "python.launchTensorBoard"
+                    "command": "python.configureTests",
+                    "title": "%python.command.python.configureTests.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
                 },
                 {
                     "category": "Python",
-                    "command": "python.switchOffInsidersChannel",
-                    "title": "%python.command.python.switchOffInsidersChannel.title%",
-                    "when": "config.python.insidersChannel != 'default'"
+                    "command": "python.createEnvironment",
+                    "title": "%python.command.python.createEnvironment.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
                 },
                 {
                     "category": "Python",
-                    "command": "python.switchToDailyChannel",
-                    "title": "%python.command.python.switchToDailyChannel.title%",
-                    "when": "config.python.insidersChannel != 'daily'"
+                    "command": "python.createEnvironment-button",
+                    "title": "%python.command.python.createEnvironment.title%",
+                    "when": "false"
                 },
                 {
                     "category": "Python",
-                    "command": "python.switchToWeeklyChannel",
-                    "title": "%python.command.python.switchToWeeklyChannel.title%",
-                    "when": "config.python.insidersChannel != 'weekly'"
+                    "command": "python.createTerminal",
+                    "title": "%python.command.python.createTerminal.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.execInTerminal",
+                    "title": "%python.command.python.execInTerminal.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported && editorLangId == python"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.execInTerminal-icon",
+                    "icon": "$(play)",
+                    "title": "%python.command.python.execInTerminalIcon.title%",
+                    "when": "false"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.execInDedicatedTerminal",
+                    "icon": "$(play)",
+                    "title": "%python.command.python.execInDedicatedTerminal.title%",
+                    "when": "false"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.execSelectionInDjangoShell",
+                    "title": "%python.command.python.execSelectionInDjangoShell.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported && editorLangId == python"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.execSelectionInTerminal",
+                    "title": "%python.command.python.execSelectionInTerminal.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported && editorLangId == python"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.execInREPL",
+                    "title": "%python.command.python.execInREPL.title%",
+                    "when": "false"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.reportIssue",
+                    "title": "%python.command.python.reportIssue.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
+                },
+                {
+                    "category": "Test",
+                    "command": "testing.reRunFailTests",
+                    "icon": "$(run-errors)",
+                    "title": "%python.command.testing.rerunFailedTests.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.setInterpreter",
+                    "title": "%python.command.python.setInterpreter.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.startREPL",
+                    "title": "%python.command.python.startTerminalREPL.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.startNativeREPL",
+                    "title": "%python.command.python.startNativeREPL.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
+                },
+                {
+                    "category": "Python",
+                    "command": "python.viewLanguageServerOutput",
+                    "enablement": "python.hasLanguageServerOutputChannel",
+                    "title": "%python.command.python.viewLanguageServerOutput.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
                 },
                 {
                     "category": "Python",
                     "command": "python.viewOutput",
-                    "title": "%python.command.python.viewOutput.title%"
+                    "title": "%python.command.python.viewOutput.title%",
+                    "when": "!virtualWorkspace && shellExecutionSupported"
+                }
+            ],
+            "editor/content": [
+                {
+                    "group": "Python",
+                    "command": "python.createEnvironment-button",
+                    "when": "showCreateEnvButton && resourceLangId == pip-requirements && !virtualWorkspace && shellExecutionSupported && !inDiffEditor && !isMergeResultEditor && pythonDepsNotInstalled"
+                },
+                {
+                    "group": "Python",
+                    "command": "python.createEnvironment-button",
+                    "when": "showCreateEnvButton && resourceFilename == pyproject.toml && pipInstallableToml && !virtualWorkspace && shellExecutionSupported  && !inDiffEditor && !isMergeResultEditor && pythonDepsNotInstalled"
                 }
             ],
             "editor/context": [
                 {
+                    "submenu": "python.run",
+                    "group": "Python",
+                    "when": "editorLangId == python && !virtualWorkspace && shellExecutionSupported && isWorkspaceTrusted && !inChat  && notebookType != jupyter-notebook"
+                },
+                {
+                    "submenu": "python.runFileInteractive",
+                    "group": "Jupyter2",
+                    "when": "editorLangId == python && !virtualWorkspace && shellExecutionSupported && !isJupyterInstalled && isWorkspaceTrusted && !inChat"
+                }
+            ],
+            "python.runFileInteractive": [
+                {
+                    "command": "python.installJupyter",
+                    "group": "Jupyter2",
+                    "when": "resourceLangId == python && !virtualWorkspace && shellExecutionSupported"
+                }
+            ],
+            "python.run": [
+                {
                     "command": "python.execInTerminal",
                     "group": "Python",
-                    "when": "resourceLangId == python"
+                    "when": "resourceLangId == python && !virtualWorkspace && shellExecutionSupported"
                 },
                 {
                     "command": "python.execSelectionInDjangoShell",
                     "group": "Python",
-                    "when": "editorHasSelection && editorLangId == python && python.isDjangoProject"
+                    "when": "editorHasSelection && editorLangId == python && python.isDjangoProject && !virtualWorkspace && shellExecutionSupported"
                 },
                 {
                     "command": "python.execSelectionInTerminal",
                     "group": "Python",
-                    "when": "editorFocus && editorLangId == python"
+                    "when": "!config.python.REPL.sendToNativeREPL && editorFocus && editorLangId == python && !virtualWorkspace && shellExecutionSupported"
                 },
                 {
-                    "command": "python.refactorExtractMethod",
-                    "group": "Refactor",
-                    "title": "Refactor: Extract Method",
-                    "when": "editorHasSelection && editorLangId == python && !notebookEditorFocused"
-                },
-                {
-                    "command": "python.refactorExtractVariable",
-                    "group": "Refactor",
-                    "title": "Refactor: Extract Variable",
-                    "when": "editorHasSelection && editorLangId == python && !notebookEditorFocused"
-                },
-                {
-                    "command": "python.sortImports",
-                    "group": "Refactor",
-                    "title": "Refactor: Sort Imports",
-                    "when": "editorLangId == python && !notebookEditorFocused"
-                }
-            ],
-            "editor/title": [
-                {
-                    "command": "python.refreshTensorBoard",
-                    "group": "navigation@0",
-                    "when": "python.hasActiveTensorBoardSession"
+                    "command": "python.execInREPL",
+                    "group": "Python",
+                    "when": "editorFocus && editorLangId == python && !virtualWorkspace && shellExecutionSupported && config.python.REPL.sendToNativeREPL"
                 }
             ],
             "editor/title/run": [
                 {
                     "command": "python.execInTerminal-icon",
                     "group": "navigation@0",
-                    "title": "%python.command.python.execInTerminal.title%",
-                    "when": "resourceLangId == python && !isInDiffEditor"
+                    "title": "%python.command.python.execInTerminalIcon.title%",
+                    "when": "resourceLangId == python && !isInDiffEditor && !virtualWorkspace && shellExecutionSupported"
                 },
                 {
-                    "command": "python.debugInTerminal",
-                    "group": "navigation@1",
-                    "title": "%python.command.python.debugInTerminal.title%",
-                    "when": "resourceLangId == python && !isInDiffEditor"
+                    "command": "python.execInDedicatedTerminal",
+                    "group": "navigation@0",
+                    "title": "%python.command.python.execInDedicatedTerminal.title%",
+                    "when": "resourceLangId == python && !isInDiffEditor && !virtualWorkspace && shellExecutionSupported"
                 }
             ],
             "explorer/context": [
                 {
                     "command": "python.execInTerminal",
                     "group": "Python",
-                    "when": "resourceLangId == python"
+                    "when": "resourceLangId == python && !virtualWorkspace && shellExecutionSupported"
+                }
+            ],
+            "file/newFile": [
+                {
+                    "command": "python.createNewFile",
+                    "group": "file",
+                    "when": "!virtualWorkspace"
                 }
             ],
             "view/title": [
                 {
-                    "command": "python.refreshTests",
-                    "when": "view == workbench.view.testing && !refreshingTests && inShowRefreshingTestsExperiment",
-                    "group": "navigation@0"
-                },
-                {
-                    "command": "python.refreshingTests",
-                    "when": "view == workbench.view.testing && refreshingTests && inShowRefreshingTestsExperiment",
-                    "group": "navigation@0"
-                },
-                {
-                    "command": "python.stopRefreshingTests",
-                    "when": "view == workbench.view.testing && refreshingTests && inShowRefreshingTestsExperiment",
-                    "group": "navigation@0"
-                },
-                {
                     "command": "testing.reRunFailTests",
-                    "when": "view == workbench.view.testing && hasFailedTests && inShowRunFailedTestsExperiment",
+                    "when": "view == workbench.view.testing && hasFailedTests && !virtualWorkspace && shellExecutionSupported",
                     "group": "navigation@1"
                 }
             ]
         },
+        "submenus": [
+            {
+                "id": "python.run",
+                "label": "%python.editor.context.submenu.runPython%",
+                "icon": "$(play)"
+            },
+            {
+                "id": "python.runFileInteractive",
+                "label": "%python.editor.context.submenu.runPythonInteractive%"
+            }
+        ],
         "viewsWelcome": [
             {
                 "view": "testing",
-                "contents": "Configure a test framework to see your tests here.\n[Configure Python Tests](command:python.configureTests)"
+                "contents": "Configure a test framework to see your tests here.\n[Configure Python Tests](command:python.configureTests)",
+                "when": "!virtualWorkspace && shellExecutionSupported"
             }
         ],
         "yamlValidation": [
@@ -1917,10 +1463,16 @@
             }
         ]
     },
+    "copilot": {
+        "tests": {
+            "getSetupConfirmation": "python.copilotSetupTests"
+        }
+    },
     "scripts": {
         "package": "gulp clean && gulp prePublishBundle && vsce package -o ms-python-insiders.vsix",
         "prePublish": "gulp clean && gulp prePublishNonBundle",
         "compile": "tsc -watch -p ./",
+        "compileApi": "node ./node_modules/typescript/lib/tsc.js -b ./pythonExtensionApi/tsconfig.json",
         "compiled": "deemon npm run compile",
         "kill-compiled": "deemon --kill npm run compile",
         "checkDependencies": "gulp checkDependencies",
@@ -1943,8 +1495,8 @@
         "testSmoke": "cross-env INSTALL_JUPYTER_EXTENSION=true \"node ./out/test/smokeTest.js\"",
         "testInsiders": "cross-env VSC_PYTHON_CI_TEST_VSC_CHANNEL=insiders INSTALL_PYLANCE_EXTENSION=true TEST_FILES_SUFFIX=insiders.test CODE_TESTS_WORKSPACE=src/testMultiRootWkspc/smokeTests \"node ./out/test/standardTest.js\"",
         "lint-staged": "node gulpfile.js",
-        "lint": "eslint --ext .ts,.js src build",
-        "lint-fix": "eslint --fix --ext .ts,.js src build gulpfile.js",
+        "lint": "eslint --ext .ts,.js src build pythonExtensionApi",
+        "lint-fix": "eslint --fix --ext .ts,.js src build pythonExtensionApi gulpfile.js",
         "format-check": "prettier --check 'src/**/*.ts' 'build/**/*.js' '.github/**/*.yml' gulpfile.js",
         "format-fix": "prettier --write 'src/**/*.ts' 'build/**/*.js' '.github/**/*.yml' gulpfile.js",
         "clean": "gulp clean",
@@ -1954,214 +1506,110 @@
         "webpack": "webpack"
     },
     "dependencies": {
-        "@vscode/jupyter-lsp-middleware": "^0.2.5",
+        "@iarna/toml": "^2.2.5",
+        "@vscode/extension-telemetry": "^0.8.4",
         "arch": "^2.1.0",
-        "azure-storage": "^2.10.4",
-        "chokidar": "^3.4.3",
-        "diff-match-patch": "^1.0.0",
-        "fs-extra": "^9.1.0",
-        "fuzzy": "^0.1.3",
-        "get-port": "^3.2.0",
-        "glob": "^7.1.2",
-        "hash.js": "^1.1.7",
-        "iconv-lite": "^0.4.21",
-        "inversify": "^5.0.4",
-        "jsonc-parser": "^2.0.3",
-        "line-by-line": "^0.1.6",
+        "fs-extra": "^11.2.0",
+        "glob": "^7.2.0",
+        "iconv-lite": "^0.6.3",
+        "inversify": "^6.0.2",
+        "jsonc-parser": "^3.0.0",
         "lodash": "^4.17.21",
-        "log4js": "^6.1.2",
-        "md5": "^2.2.1",
-        "minimatch": "^3.0.4",
+        "minimatch": "^5.0.1",
         "named-js-regexp": "^1.3.3",
-        "node-fetch": "^2.6.1",
         "node-stream-zip": "^1.6.0",
-        "portfinder": "^1.0.25",
         "reflect-metadata": "^0.1.12",
-        "request": "^2.87.0",
-        "request-progress": "^3.0.0",
         "rxjs": "^6.5.4",
         "rxjs-compat": "^6.5.4",
-        "semver": "^5.5.0",
+        "semver": "^7.5.2",
         "stack-trace": "0.0.10",
-        "string-argv": "^0.3.1",
-        "strip-ansi": "^5.2.0",
-        "sudo-prompt": "^8.2.0",
-        "tmp": "^0.0.29",
-        "tree-kill": "^1.2.2",
-        "typescript-char": "^0.0.0",
-        "uint64be": "^1.0.1",
-        "unicode": "^10.0.0",
-        "untildify": "^3.0.2",
-        "vscode-debugadapter": "^1.28.0",
+        "sudo-prompt": "^9.2.1",
+        "tmp": "^0.0.33",
+        "uint64be": "^3.0.0",
+        "unicode": "^14.0.0",
         "vscode-debugprotocol": "^1.28.0",
-        "vscode-extension-telemetry": "0.3.2",
-        "vscode-jsonrpc": "6.0.0",
-        "vscode-languageclient": "7.0.0",
-        "vscode-languageserver": "7.0.0",
-        "vscode-languageserver-protocol": "3.16.0",
-        "vscode-tas-client": "^0.1.22",
+        "vscode-jsonrpc": "^9.0.0-next.5",
+        "vscode-languageclient": "^10.0.0-next.12",
+        "vscode-languageserver-protocol": "^3.17.6-next.10",
+        "vscode-tas-client": "^0.1.84",
+        "which": "^2.0.2",
         "winreg": "^1.2.4",
-        "winston": "^3.2.1",
-        "xml2js": "^0.4.19"
+        "xml2js": "^0.5.0"
     },
     "devDependencies": {
-        "@enonic/fnv-plus": "^1.3.0",
-        "@istanbuljs/nyc-config-typescript": "^0.1.3",
-        "@sinonjs/fake-timers": "^6.0.1",
-        "@types/ansi-regex": "^4.0.0",
+        "@istanbuljs/nyc-config-typescript": "^1.0.2",
+        "@types/bent": "^7.3.0",
         "@types/chai": "^4.1.2",
-        "@types/chai-arrays": "^1.0.2",
+        "@types/chai-arrays": "^2.0.0",
         "@types/chai-as-promised": "^7.1.0",
-        "@types/copy-webpack-plugin": "^4.4.2",
-        "@types/cors": "^2.8.6",
-        "@types/debug": "^4.1.5",
-        "@types/dedent": "^0.7.0",
-        "@types/del": "^3.0.0",
-        "@types/diff-match-patch": "^1.0.32",
-        "@types/download": "^6.2.2",
-        "@types/enzyme": "^3.1.14",
-        "@types/event-stream": "^3.3.33",
-        "@types/fs-extra": "^5.0.1",
-        "@types/get-port": "^3.2.0",
-        "@types/glob": "^5.0.35",
-        "@types/iconv-lite": "^0.0.1",
+        "@types/download": "^8.0.1",
+        "@types/fs-extra": "^11.0.4",
+        "@types/glob": "^7.2.0",
         "@types/lodash": "^4.14.104",
-        "@types/md5": "^2.1.32",
-        "@types/memoize-one": "^4.1.1",
-        "@types/mocha": "^5.2.7",
-        "@types/nock": "^10.0.3",
-        "@types/node": "^12.19.12",
-        "@types/promisify-node": "^0.4.0",
-        "@types/request": "^2.47.0",
+        "@types/mocha": "^9.1.0",
+        "@types/node": "^22.5.0",
         "@types/semver": "^5.5.0",
         "@types/shortid": "^0.0.29",
-        "@types/sinon": "^7.5.1",
-        "@types/sinonjs__fake-timers": "^6.0.1",
-        "@types/socket.io": "^2.1.4",
+        "@types/sinon": "^17.0.3",
         "@types/stack-trace": "0.0.29",
-        "@types/temp": "^0.8.32",
-        "@types/tmp": "0.0.33",
-        "@types/untildify": "^3.0.0",
-        "@types/uuid": "^3.4.3",
-        "@types/vscode": "~1.53.0",
-        "@types/webpack-bundle-analyzer": "^2.13.0",
+        "@types/tmp": "^0.0.33",
+        "@types/vscode": "^1.93.0",
+        "@types/which": "^2.0.1",
         "@types/winreg": "^1.2.30",
         "@types/xml2js": "^0.4.2",
-        "@typescript-eslint/eslint-plugin": "^3.7.0",
-        "@typescript-eslint/parser": "^3.7.0",
-        "@vscode/test-electron": "^1.6.1",
-        "acorn": "^6.4.1",
-        "ansi-to-html": "^0.6.7",
-        "babel-loader": "^8.0.3",
-        "babel-plugin-inline-json-import": "^0.3.1",
-        "babel-plugin-transform-runtime": "^6.23.0",
-        "babel-polyfill": "^6.26.0",
-        "cache-loader": "^4.1.0",
+        "@typescript-eslint/eslint-plugin": "^6.21.0",
+        "@typescript-eslint/parser": "^6.21.0",
+        "@vscode/test-electron": "^2.3.8",
+        "@vscode/vsce": "^2.27.0",
+        "bent": "^7.3.12",
         "chai": "^4.1.2",
         "chai-arrays": "^2.0.0",
         "chai-as-promised": "^7.1.1",
-        "chai-http": "^4.3.0",
-        "copy-webpack-plugin": "^5.1.2",
-        "cors": "^2.8.5",
-        "cross-env": "^6.0.3",
+        "copy-webpack-plugin": "^9.1.0",
+        "cross-env": "^7.0.3",
         "cross-spawn": "^6.0.5",
-        "css-loader": "^1.0.1",
-        "dedent": "^0.7.0",
-        "deemon": "^1.4.0",
-        "del": "^3.0.0",
-        "download": "^7.0.0",
-        "enzyme": "^3.7.0",
+        "del": "^6.0.0",
+        "download": "^8.0.0",
         "eslint": "^7.2.0",
         "eslint-config-airbnb": "^18.2.0",
         "eslint-config-prettier": "^8.3.0",
-        "eslint-plugin-import": "^2.22.0",
+        "eslint-plugin-import": "^2.29.1",
         "eslint-plugin-jsx-a11y": "^6.3.1",
+        "eslint-plugin-no-only-tests": "^3.3.0",
         "eslint-plugin-react": "^7.20.3",
         "eslint-plugin-react-hooks": "^4.0.0",
-        "expose-loader": "^0.7.5",
-        "express": "^4.17.1",
-        "extract-zip": "^1.6.7",
-        "fast-xml-parser": "^3.16.0",
-        "file-loader": "^5.1.0",
-        "filemanager-webpack-plugin-fixed": "^2.0.9",
-        "flat": "^4.0.0",
-        "fork-ts-checker-webpack-plugin": "^4.1.6",
-        "gulp": "^4.0.0",
-        "gulp-chmod": "^2.0.0",
-        "gulp-gunzip": "^1.1.0",
-        "gulp-rename": "^1.4.0",
-        "gulp-sourcemaps": "^2.6.4",
-        "gulp-typescript": "^4.0.1",
-        "husky": "^1.1.2",
-        "immutable": "^4.0.0-rc.12",
-        "json-loader": "^0.5.7",
-        "less": "^3.9.0",
-        "less-loader": "^5.0.0",
-        "less-plugin-inline-urls": "^1.2.0",
-        "loader-utils": "^1.1.0",
-        "lolex": "^5.1.2",
-        "memoize-one": "^5.1.1",
-        "mocha": "^8.1.1",
-        "mocha-junit-reporter": "^1.17.0",
+        "expose-loader": "^3.1.0",
+        "flat": "^5.0.2",
+        "get-port": "^5.1.1",
+        "gulp": "^5.0.0",
+        "gulp-typescript": "^5.0.0",
+        "mocha": "^9.2.2",
+        "mocha-junit-reporter": "^2.0.2",
         "mocha-multi-reporters": "^1.1.7",
-        "monaco-editor": "0.18.1",
-        "monaco-editor-textmate": "^2.2.1",
-        "monaco-editor-webpack-plugin": "^1.7.0",
-        "monaco-textmate": "^3.0.1",
-        "nocache": "^2.1.0",
-        "nock": "^10.0.6",
         "node-has-native-dependencies": "^1.0.2",
-        "node-html-parser": "^1.1.13",
         "node-loader": "^1.0.2",
+        "node-polyfill-webpack-plugin": "^1.1.4",
         "nyc": "^15.0.0",
-        "postcss": "^8.2.10",
-        "postcss-cssnext": "^3.1.0",
-        "postcss-import": "^12.0.1",
-        "postcss-loader": "^3.0.0",
         "prettier": "^2.0.2",
-        "range-inclusive": "^1.0.2",
-        "raw-loader": "^0.5.1",
-        "remove-files-webpack-plugin": "^1.4.0",
-        "requirejs": "^2.3.6",
         "rewiremock": "^3.13.0",
-        "rimraf": "^3.0.2",
-        "serialize-javascript": "^3.1.0",
         "shortid": "^2.2.8",
-        "sinon": "^8.0.1",
-        "socket.io": "^2.4.0",
+        "sinon": "^18.0.0",
         "source-map-support": "^0.5.12",
-        "style-loader": "^0.23.1",
-        "svg-inline-loader": "^0.8.0",
-        "terser-webpack-plugin": "^3.1.0",
-        "thread-loader": "^2.1.3",
-        "transform-loader": "^0.2.4",
-        "ts-loader": "^5.3.0",
-        "ts-mock-imports": "^1.3.0",
+        "ts-loader": "^9.2.8",
         "ts-mockito": "^2.5.0",
-        "ts-node": "^8.3.0",
+        "ts-node": "^10.7.0",
         "tsconfig-paths-webpack-plugin": "^3.2.0",
         "typemoq": "^2.1.0",
-        "typescript": "4.1.5",
-        "typescript-formatter": "^7.1.0",
-        "unicode-properties": "^1.3.1",
-        "url-loader": "^1.1.2",
-        "uuid": "^3.3.2",
-        "vsce": "^1.96.1",
-        "vscode-debugadapter-testsupport": "^1.27.0",
-        "webpack": "^4.33.0",
-        "webpack-bundle-analyzer": "^3.6.0",
-        "webpack-cli": "^3.1.2",
+        "typescript": "~5.2",
+        "uuid": "^8.3.2",
+        "webpack": "^5.76.0",
+        "webpack-bundle-analyzer": "^4.5.0",
+        "webpack-cli": "^4.9.2",
         "webpack-fix-default-import-plugin": "^1.0.3",
-        "webpack-merge": "^4.1.4",
-        "webpack-node-externals": "^1.7.2",
-        "webpack-require-from": "^1.8.0",
-        "why-is-node-running": "^2.0.3",
-        "wtfnode": "^0.8.0",
+        "webpack-merge": "^5.8.0",
+        "webpack-node-externals": "^3.0.0",
+        "webpack-require-from": "^1.8.6",
+        "worker-loader": "^3.0.8",
         "yargs": "^15.3.1"
-    },
-    "__metadata": {
-        "id": "f1f59ae4-9318-4f3c-a9b5-81b2eaa5f8a5",
-        "publisherDisplayName": "Microsoft",
-        "publisherId": "998b010b-e2af-44a5-a6cd-0b5fd3b9b6f8"
     }
 }

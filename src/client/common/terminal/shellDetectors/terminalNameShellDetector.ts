@@ -5,16 +5,12 @@
 
 import { injectable } from 'inversify';
 import { Terminal } from 'vscode';
-import { traceVerbose } from '../../logger';
+import { traceVerbose } from '../../../logging';
 import { ShellIdentificationTelemetry, TerminalShellType } from '../types';
 import { BaseShellDetector } from './baseShellDetector';
 
 /**
  * Identifies the shell, based on the display name of the terminal.
- *
- * @export
- * @class TerminalNameShellDetector
- * @extends {BaseShellDetector}
  */
 @injectable()
 export class TerminalNameShellDetector extends BaseShellDetector {

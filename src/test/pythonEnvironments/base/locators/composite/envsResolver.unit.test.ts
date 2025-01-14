@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import { assert } from 'chai';
+import { assert, expect } from 'chai';
 import { cloneDeep } from 'lodash';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { ImportMock } from 'ts-mock-imports';
 import { EventEmitter, Uri } from 'vscode';
 import { ExecutionResult } from '../../../../../client/common/process/types';
 import { IDisposableRegistry } from '../../../../../client/common/types';
@@ -14,11 +13,18 @@ import * as platformApis from '../../../../../client/common/utils/platform';
 import {
     PythonEnvInfo,
     PythonEnvKind,
+    PythonEnvType,
     PythonVersion,
     UNKNOWN_PYTHON_VERSION,
 } from '../../../../../client/pythonEnvironments/base/info';
-import { parseVersion } from '../../../../../client/pythonEnvironments/base/info/pythonVersion';
-import { BasicEnvInfo, PythonEnvUpdatedEvent } from '../../../../../client/pythonEnvironments/base/locator';
+import { getEmptyVersion, parseVersion } from '../../../../../client/pythonEnvironments/base/info/pythonVersion';
+import {
+    BasicEnvInfo,
+    isProgressEvent,
+    ProgressNotificationEvent,
+    ProgressReportStage,
+    PythonEnvUpdatedEvent,
+} from '../../../../../client/pythonEnvironments/base/locator';
 import { PythonEnvsResolver } from '../../../../../client/pythonEnvironments/base/locators/composite/envsResolver';
 import { PythonEnvsChangedEvent } from '../../../../../client/pythonEnvironments/base/watcher';
 import * as externalDependencies from '../../../../../client/pythonEnvironments/common/externalDependencies';
@@ -29,6 +35,10 @@ import {
 import { TEST_LAYOUT_ROOT } from '../../../common/commonTestConstants';
 import { assertEnvEqual, assertEnvsEqual } from '../envTestUtils';
 import { createBasicEnv, getEnvs, getEnvsWithUpdates, SimpleLocator } from '../../common';
+import { getOSType, OSType } from '../../../../common';
+import { CondaInfo } from '../../../../../client/pythonEnvironments/common/environmentManagers/conda';
+import { createDeferred } from '../../../../../client/common/utils/async';
+import * as workspaceApis from '../../../../../client/common/vscodeApis/workspaceApis';
 
 suite('Python envs locator - Environments Resolver', () => {
     let envInfoService: IEnvironmentInfoService;
@@ -47,7 +57,11 @@ suite('Python envs locator - Environments Resolver', () => {
     /**
      * Returns the expected environment to be returned by Environment info service
      */
-    function createExpectedEnvInfo(env: PythonEnvInfo, expectedDisplay: string): PythonEnvInfo {
+    function createExpectedEnvInfo(
+        env: PythonEnvInfo,
+        expectedDisplay: string,
+        expectedDetailedDisplay: string,
+    ): PythonEnvInfo {
         const updatedEnv = cloneDeep(env);
         updatedEnv.version = {
             ...parseVersion('3.8.3-final'),
@@ -57,6 +71,12 @@ suite('Python envs locator - Environments Resolver', () => {
         updatedEnv.executable.sysPrefix = 'path';
         updatedEnv.arch = Architecture.x64;
         updatedEnv.display = expectedDisplay;
+        updatedEnv.detailedDisplayName = expectedDetailedDisplay;
+        updatedEnv.identifiedUsingNativeLocator = updatedEnv.identifiedUsingNativeLocator ?? undefined;
+        updatedEnv.pythonRunCommand = updatedEnv.pythonRunCommand ?? undefined;
+        if (env.kind === PythonEnvKind.Conda) {
+            env.type = PythonEnvType.Conda;
+        }
         return updatedEnv;
     }
 
@@ -66,6 +86,9 @@ suite('Python envs locator - Environments Resolver', () => {
         version: PythonVersion = UNKNOWN_PYTHON_VERSION,
         name = '',
         location = '',
+        display: string | undefined = undefined,
+        type?: PythonEnvType,
+        detailedDisplay?: string,
     ): PythonEnvInfo {
         return {
             name,
@@ -77,21 +100,24 @@ suite('Python envs locator - Environments Resolver', () => {
                 ctime: -1,
                 mtime: -1,
             },
-            display: undefined,
+            display,
+            detailedDisplayName: detailedDisplay ?? display,
             version,
             arch: Architecture.Unknown,
             distro: { org: '' },
-            searchLocation: Uri.file(path.dirname(location)),
+            searchLocation: Uri.file(location),
             source: [],
+            type,
+            identifiedUsingNativeLocator: undefined,
+            pythonRunCommand: undefined,
         };
     }
     suite('iterEnvs()', () => {
         let stubShellExec: sinon.SinonStub;
         setup(() => {
             sinon.stub(platformApis, 'getOSType').callsFake(() => platformApis.OSType.Windows);
-            stubShellExec = ImportMock.mockFunction(
-                externalDependencies,
-                'shellExecute',
+            stubShellExec = sinon.stub(externalDependencies, 'shellExecute');
+            stubShellExec.returns(
                 new Promise<ExecutionResult<string>>((resolve) => {
                     resolve({
                         stdout:
@@ -99,7 +125,7 @@ suite('Python envs locator - Environments Resolver', () => {
                     });
                 }),
             );
-            sinon.stub(externalDependencies, 'getWorkspaceFolders').returns([testVirtualHomeDir]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolderPaths').returns([testVirtualHomeDir]);
         });
 
         teardown(() => {
@@ -117,6 +143,9 @@ suite('Python envs locator - Environments Resolver', () => {
                 undefined,
                 'win1',
                 path.join(testVirtualHomeDir, '.venvs', 'win1'),
+                "Python ('win1')",
+                PythonEnvType.Virtual,
+                "Python ('win1': venv)",
             );
             const envsReturnedByParentLocator = [env1];
             const parentLocator = new SimpleLocator<BasicEnvInfo>(envsReturnedByParentLocator);
@@ -140,6 +169,8 @@ suite('Python envs locator - Environments Resolver', () => {
                 undefined,
                 'win1',
                 path.join(testVirtualHomeDir, '.venvs', 'win1'),
+                undefined,
+                PythonEnvType.Virtual,
             );
             const envsReturnedByParentLocator = [env1];
             const parentLocator = new SimpleLocator<BasicEnvInfo>(envsReturnedByParentLocator);
@@ -149,7 +180,11 @@ suite('Python envs locator - Environments Resolver', () => {
             const envs = await getEnvsWithUpdates(iterator);
 
             assertEnvsEqual(envs, [
-                createExpectedEnvInfo(resolvedEnvReturnedByBasicResolver, "Python 3.8.3 64-bit ('win1': venv)"),
+                createExpectedEnvInfo(
+                    resolvedEnvReturnedByBasicResolver,
+                    "Python 3.8.3 ('win1')",
+                    "Python 3.8.3 ('win1': venv)",
+                ),
             ]);
         });
 
@@ -158,7 +193,6 @@ suite('Python envs locator - Environments Resolver', () => {
             stubShellExec.returns(
                 new Promise<ExecutionResult<string>>((resolve) => {
                     resolve({
-                        stderr: 'Kaboom',
                         stdout: '',
                     });
                 }),
@@ -183,22 +217,24 @@ suite('Python envs locator - Environments Resolver', () => {
         test('Updates to environments from the incoming iterator are applied properly', async () => {
             // Arrange
             const env = createBasicEnv(
-                PythonEnvKind.Venv,
+                PythonEnvKind.Unknown,
                 path.join(testVirtualHomeDir, '.venvs', 'win1', 'python.exe'),
             );
             const updatedEnv = createBasicEnv(
-                PythonEnvKind.Poetry,
+                PythonEnvKind.VirtualEnv, // Ensure this type is discarded.
                 path.join(testVirtualHomeDir, '.venvs', 'win1', 'python.exe'),
             );
             const resolvedUpdatedEnvReturnedByBasicResolver = createExpectedResolvedEnvInfo(
                 path.join(testVirtualHomeDir, '.venvs', 'win1', 'python.exe'),
-                PythonEnvKind.Poetry,
+                PythonEnvKind.Venv,
                 undefined,
                 'win1',
                 path.join(testVirtualHomeDir, '.venvs', 'win1'),
+                undefined,
+                PythonEnvType.Virtual,
             );
             const envsReturnedByParentLocator = [env];
-            const didUpdate = new EventEmitter<PythonEnvUpdatedEvent<BasicEnvInfo> | null>();
+            const didUpdate = new EventEmitter<PythonEnvUpdatedEvent<BasicEnvInfo> | ProgressNotificationEvent>();
             const parentLocator = new SimpleLocator<BasicEnvInfo>(envsReturnedByParentLocator, {
                 onUpdated: didUpdate.event,
             });
@@ -207,8 +243,9 @@ suite('Python envs locator - Environments Resolver', () => {
             // Act
             const iterator = resolver.iterEnvs();
             const iteratorUpdateCallback = () => {
+                didUpdate.fire({ stage: ProgressReportStage.discoveryStarted });
                 didUpdate.fire({ index: 0, old: env, update: updatedEnv });
-                didUpdate.fire(null); // It is essential for the incoming iterator to fire "null" event signifying it's done
+                didUpdate.fire({ stage: ProgressReportStage.discoveryFinished }); // It is essential for the incoming iterator to fire event signifying it's done
             };
             const envs = await getEnvsWithUpdates(iterator, iteratorUpdateCallback);
 
@@ -216,9 +253,76 @@ suite('Python envs locator - Environments Resolver', () => {
             assertEnvsEqual(envs, [
                 createExpectedEnvInfo(
                     resolvedUpdatedEnvReturnedByBasicResolver,
-                    "Python 3.8.3 64-bit ('win1': poetry)",
+                    "Python 3.8.3 ('win1')",
+                    "Python 3.8.3 ('win1': venv)",
                 ),
             ]);
+            didUpdate.dispose();
+        });
+
+        test('Ensure progress updates are emitted correctly', async () => {
+            // Arrange
+            const shellExecDeferred = createDeferred<void>();
+            stubShellExec.reset();
+            stubShellExec.returns(
+                shellExecDeferred.promise.then(
+                    () =>
+                        new Promise<ExecutionResult<string>>((resolve) => {
+                            resolve({
+                                stdout:
+                                    '{"versionInfo": [3, 8, 3, "final", 0], "sysPrefix": "path", "sysVersion": "3.8.3 (tags/v3.8.3:6f8c832, May 13 2020, 22:37:02) [MSC v.1924 64 bit (AMD64)]", "is64Bit": true}',
+                            });
+                        }),
+                ),
+            );
+            const env = createBasicEnv(
+                PythonEnvKind.Venv,
+                path.join(testVirtualHomeDir, '.venvs', 'win1', 'python.exe'),
+            );
+            const updatedEnv = createBasicEnv(
+                PythonEnvKind.Poetry,
+                path.join(testVirtualHomeDir, '.venvs', 'win1', 'python.exe'),
+            );
+            const envsReturnedByParentLocator = [env];
+            const didUpdate = new EventEmitter<PythonEnvUpdatedEvent<BasicEnvInfo> | ProgressNotificationEvent>();
+            const parentLocator = new SimpleLocator<BasicEnvInfo>(envsReturnedByParentLocator, {
+                onUpdated: didUpdate.event,
+            });
+            const resolver = new PythonEnvsResolver(parentLocator, envInfoService);
+
+            const iterator = resolver.iterEnvs();
+            let stage: ProgressReportStage | undefined;
+            let waitForProgressEvent = createDeferred<void>();
+            iterator.onUpdated!(async (event) => {
+                if (isProgressEvent(event)) {
+                    stage = event.stage;
+                    waitForProgressEvent.resolve();
+                }
+            });
+            // Act
+            let result = await iterator.next();
+            while (!result.done) {
+                result = await iterator.next();
+            }
+            didUpdate.fire({ stage: ProgressReportStage.discoveryStarted });
+            await waitForProgressEvent.promise;
+            // Assert
+            expect(stage).to.equal(ProgressReportStage.discoveryStarted);
+
+            // Act
+            waitForProgressEvent = createDeferred<void>();
+            didUpdate.fire({ index: 0, old: env, update: updatedEnv });
+            didUpdate.fire({ stage: ProgressReportStage.discoveryFinished });
+            await waitForProgressEvent.promise;
+            // Assert
+            expect(stage).to.equal(ProgressReportStage.allPathsDiscovered);
+
+            // Act
+            waitForProgressEvent = createDeferred<void>();
+            shellExecDeferred.resolve();
+            await waitForProgressEvent.promise;
+            // Assert
+            expect(stage).to.equal(ProgressReportStage.discoveryFinished);
             didUpdate.dispose();
         });
     });
@@ -241,11 +345,22 @@ suite('Python envs locator - Environments Resolver', () => {
 
     suite('resolveEnv()', () => {
         let stubShellExec: sinon.SinonStub;
+        const envsWithoutPython = path.join(TEST_LAYOUT_ROOT, 'envsWithoutPython');
+        function condaInfo(condaPrefix: string): CondaInfo {
+            return {
+                conda_version: '4.8.0',
+                python_version: '3.9.0',
+                'sys.version': '3.9.0',
+                'sys.prefix': '/some/env',
+                root_prefix: '/some/prefix',
+                envs: [condaPrefix],
+                envs_dirs: [path.dirname(condaPrefix)],
+            };
+        }
         setup(() => {
             sinon.stub(platformApis, 'getOSType').callsFake(() => platformApis.OSType.Windows);
-            stubShellExec = ImportMock.mockFunction(
-                externalDependencies,
-                'shellExecute',
+            stubShellExec = sinon.stub(externalDependencies, 'shellExecute');
+            stubShellExec.returns(
                 new Promise<ExecutionResult<string>>((resolve) => {
                     resolve({
                         stdout:
@@ -253,20 +368,25 @@ suite('Python envs locator - Environments Resolver', () => {
                     });
                 }),
             );
-            sinon.stub(externalDependencies, 'getWorkspaceFolders').returns([testVirtualHomeDir]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolderPaths').returns([testVirtualHomeDir]);
         });
 
         teardown(() => {
             sinon.restore();
         });
 
-        test('Calls into basic resolver to get environment info, then calls environnment service to resolve environment further and return it', async () => {
+        test('Calls into basic resolver to get environment info, then calls environnment service to resolve environment further and return it', async function () {
+            if (getOSType() !== OSType.Windows) {
+                this.skip();
+            }
             const resolvedEnvReturnedByBasicResolver = createExpectedResolvedEnvInfo(
                 path.join(testVirtualHomeDir, '.venvs', 'win1', 'python.exe'),
                 PythonEnvKind.Venv,
                 undefined,
                 'win1',
                 path.join(testVirtualHomeDir, '.venvs', 'win1'),
+                undefined,
+                PythonEnvType.Virtual,
             );
             const parentLocator = new SimpleLocator([]);
             const resolver = new PythonEnvsResolver(parentLocator, envInfoService);
@@ -275,8 +395,33 @@ suite('Python envs locator - Environments Resolver', () => {
 
             assertEnvEqual(
                 expected,
-                createExpectedEnvInfo(resolvedEnvReturnedByBasicResolver, "Python 3.8.3 64-bit ('win1': venv)"),
+                createExpectedEnvInfo(
+                    resolvedEnvReturnedByBasicResolver,
+                    "Python 3.8.3 ('win1')",
+                    "Python 3.8.3 ('win1': venv)",
+                ),
             );
+        });
+
+        test('Resolver should return empty version info for envs lacking an interpreter', async function () {
+            if (getOSType() !== OSType.Windows) {
+                this.skip();
+            }
+            sinon.stub(externalDependencies, 'getPythonSetting').withArgs('condaPath').returns('conda');
+            sinon.stub(externalDependencies, 'exec').callsFake(async (command: string, args: string[]) => {
+                if (command === 'conda' && args[0] === 'info' && args[1] === '--json') {
+                    return { stdout: JSON.stringify(condaInfo(path.join(envsWithoutPython, 'condaLackingPython'))) };
+                }
+                throw new Error(`${command} is missing or is not executable`);
+            });
+            const parentLocator = new SimpleLocator([]);
+            const resolver = new PythonEnvsResolver(parentLocator, envInfoService);
+
+            const expected = await resolver.resolveEnv(path.join(envsWithoutPython, 'condaLackingPython'));
+
+            assert.deepEqual(expected?.version, getEmptyVersion());
+            assert.equal(expected?.display, "Python ('condaLackingPython')");
+            assert.equal(expected?.detailedDisplayName, "Python ('condaLackingPython': conda)");
         });
 
         test('If running interpreter info throws error, return undefined', async () => {
@@ -293,7 +438,7 @@ suite('Python envs locator - Environments Resolver', () => {
             assert.deepEqual(expected, undefined);
         });
 
-        test('If fetching interpreter info fails with stderr, return undefined', async () => {
+        test('If parsing interpreter info fails, return undefined', async () => {
             stubShellExec.returns(
                 new Promise<ExecutionResult<string>>((resolve) => {
                     resolve({

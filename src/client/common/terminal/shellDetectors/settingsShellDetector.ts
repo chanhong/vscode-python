@@ -6,7 +6,6 @@
 import { inject, injectable } from 'inversify';
 import { Terminal } from 'vscode';
 import { IWorkspaceService } from '../../application/types';
-import { traceVerbose } from '../../logger';
 import { IPlatformService } from '../../platform/types';
 import { OSType } from '../../utils/platform';
 import { ShellIdentificationTelemetry, TerminalShellType } from '../types';
@@ -14,10 +13,6 @@ import { BaseShellDetector } from './baseShellDetector';
 
 /**
  * Identifies the shell based on the user settings.
- *
- * @export
- * @class SettingsShellDetector
- * @extends {BaseShellDetector}
  */
 @injectable()
 export class SettingsShellDetector extends BaseShellDetector {
@@ -62,7 +57,6 @@ export class SettingsShellDetector extends BaseShellDetector {
         } else {
             telemetryProperties.shellIdentificationSource = 'settings';
         }
-        traceVerbose(`Shell path from user settings '${shellPath}'`);
         return shell;
     }
 }

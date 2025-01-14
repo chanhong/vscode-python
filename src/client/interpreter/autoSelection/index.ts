@@ -6,15 +6,16 @@
 import { inject, injectable } from 'inversify';
 import { Event, EventEmitter, Uri } from 'vscode';
 import { IWorkspaceService } from '../../common/application/types';
+import { DiscoveryUsingWorkers } from '../../common/experiments/groups';
 import '../../common/extensions';
 import { IFileSystem } from '../../common/platform/types';
-import { IPersistentState, IPersistentStateFactory, Resource } from '../../common/types';
+import { IExperimentService, IPersistentState, IPersistentStateFactory, Resource } from '../../common/types';
 import { createDeferred, Deferred } from '../../common/utils/async';
 import { compareSemVerLikeVersions } from '../../pythonEnvironments/base/info/pythonVersion';
+import { ProgressReportStage } from '../../pythonEnvironments/base/locator';
 import { PythonEnvironment } from '../../pythonEnvironments/info';
 import { sendTelemetryEvent } from '../../telemetry';
 import { EventName } from '../../telemetry/constants';
-import { EnvTypeHeuristic, getEnvTypeHeuristic } from '../configuration/environmentTypeComparer';
 import { IInterpreterComparer } from '../configuration/types';
 import { IInterpreterHelper, IInterpreterService } from '../contracts';
 import { IInterpreterAutoSelectionService, IInterpreterAutoSelectionProxyService } from './types';
@@ -45,6 +46,7 @@ export class InterpreterAutoSelectionService implements IInterpreterAutoSelectio
         @inject(IInterpreterComparer) private readonly envTypeComparer: IInterpreterComparer,
         @inject(IInterpreterAutoSelectionProxyService) proxy: IInterpreterAutoSelectionProxyService,
         @inject(IInterpreterHelper) private readonly interpreterHelper: IInterpreterHelper,
+        @inject(IExperimentService) private readonly experimentService: IExperimentService,
     ) {
         proxy.registerInstance!(this);
     }
@@ -182,6 +184,11 @@ export class InterpreterAutoSelectionService implements IInterpreterAutoSelectio
         return this.stateFactory.createWorkspacePersistentState(key, undefined);
     }
 
+    private getAutoSelectionQueriedOnceState(): IPersistentState<boolean | undefined> {
+        const key = `autoSelectionInterpretersQueriedOnce`;
+        return this.stateFactory.createGlobalPersistentState(key, undefined);
+    }
+
     /**
      * Auto-selection logic:
      * 1. If there are cached interpreters (not the first session in this workspace)
@@ -195,31 +202,56 @@ export class InterpreterAutoSelectionService implements IInterpreterAutoSelectio
     private async autoselectInterpreterWithLocators(resource: Resource): Promise<void> {
         // Do not perform a full interpreter search if we already have cached interpreters for this workspace.
         const queriedState = this.getAutoSelectionInterpretersQueryState(resource);
-        if (queriedState.value !== true && resource) {
+        const globalQueriedState = this.getAutoSelectionQueriedOnceState();
+        if (globalQueriedState.value && queriedState.value !== true && resource) {
             await this.interpreterService.triggerRefresh({
                 searchLocations: { roots: [resource], doNotIncludeNonRooted: true },
             });
         }
 
-        const interpreters = await this.interpreterService.getAllInterpreters(resource);
+        await this.envTypeComparer.initialize(resource);
+        const inExperiment = this.experimentService.inExperimentSync(DiscoveryUsingWorkers.experiment);
         const workspaceUri = this.interpreterHelper.getActiveWorkspaceUri(resource);
+        let recommendedInterpreter: PythonEnvironment | undefined;
+        if (inExperiment) {
+            if (!globalQueriedState.value) {
+                // Global interpreters are loaded the first time an extension loads, after which we don't need to
+                // wait on global interpreter promise refresh.
+                // Do not wait for validation of all interpreters to finish, we only need to validate the recommended interpreter.
+                await this.interpreterService.getRefreshPromise({ stage: ProgressReportStage.allPathsDiscovered });
+            }
+            let interpreters = this.interpreterService.getInterpreters(resource);
 
-        // When auto-selecting an intepreter for a workspace, we either want to return a local one
-        // or fallback on a globally-installed interpreter, and we don't want want to suggest a global environment
-        // because we would have to add a way to match environments to a workspace.
-        const filteredInterpreters = interpreters.filter(
-            (i) => getEnvTypeHeuristic(i, workspaceUri?.folderUri.fsPath || '') !== EnvTypeHeuristic.Global,
-        );
-
-        filteredInterpreters.sort(this.envTypeComparer.compare.bind(this.envTypeComparer));
-
-        if (workspaceUri) {
-            this.setWorkspaceInterpreter(workspaceUri.folderUri, filteredInterpreters[0]);
+            recommendedInterpreter = this.envTypeComparer.getRecommended(interpreters, workspaceUri?.folderUri);
+            const details = recommendedInterpreter
+                ? await this.interpreterService.getInterpreterDetails(recommendedInterpreter.path)
+                : undefined;
+            if (!details || !recommendedInterpreter) {
+                await this.interpreterService.refreshPromise; // Interpreter is invalid, wait for all of validation to finish.
+                interpreters = this.interpreterService.getInterpreters(resource);
+                recommendedInterpreter = this.envTypeComparer.getRecommended(interpreters, workspaceUri?.folderUri);
+            }
         } else {
-            this.setGlobalInterpreter(filteredInterpreters[0]);
+            if (!globalQueriedState.value) {
+                // Global interpreters are loaded the first time an extension loads, after which we don't need to
+                // wait on global interpreter promise refresh.
+                await this.interpreterService.refreshPromise;
+            }
+            const interpreters = this.interpreterService.getInterpreters(resource);
+
+            recommendedInterpreter = this.envTypeComparer.getRecommended(interpreters, workspaceUri?.folderUri);
+        }
+        if (!recommendedInterpreter) {
+            return;
+        }
+        if (workspaceUri) {
+            this.setWorkspaceInterpreter(workspaceUri.folderUri, recommendedInterpreter);
+        } else {
+            this.setGlobalInterpreter(recommendedInterpreter);
         }
 
         queriedState.updateValue(true);
+        globalQueriedState.updateValue(true);
 
         this.didAutoSelectedInterpreterEmitter.fire();
     }

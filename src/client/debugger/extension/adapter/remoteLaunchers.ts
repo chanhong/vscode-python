@@ -3,12 +3,8 @@
 
 'use strict';
 
-import * as path from 'path';
-import { EXTENSION_ROOT_DIR } from '../../../common/constants';
 import '../../../common/extensions';
-
-const pathToPythonLibDir = path.join(EXTENSION_ROOT_DIR, 'pythonFiles', 'lib', 'python');
-const pathToDebugger = path.join(pathToPythonLibDir, 'debugpy');
+import { getDebugpyPath } from '../../pythonDebugger';
 
 type RemoteDebugOptions = {
     host: string;
@@ -16,11 +12,16 @@ type RemoteDebugOptions = {
     waitUntilDebuggerAttaches: boolean;
 };
 
-export function getDebugpyLauncherArgs(options: RemoteDebugOptions, debuggerPath: string = pathToDebugger) {
-    const waitArgs = options.waitUntilDebuggerAttaches ? ['--wait-for-client'] : [];
-    return [debuggerPath.fileToCommandArgument(), '--listen', `${options.host}:${options.port}`, ...waitArgs];
-}
+export async function getDebugpyLauncherArgs(options: RemoteDebugOptions, debuggerPath?: string) {
+    if (!debuggerPath) {
+        debuggerPath = await getDebugpyPath();
+    }
 
-export function getDebugpyPackagePath(): string {
-    return pathToDebugger;
+    const waitArgs = options.waitUntilDebuggerAttaches ? ['--wait-for-client'] : [];
+    return [
+        debuggerPath.fileToCommandArgumentForPythonExt(),
+        '--listen',
+        `${options.host}:${options.port}`,
+        ...waitArgs,
+    ];
 }

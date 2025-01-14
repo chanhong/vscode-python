@@ -2,15 +2,13 @@
 // Licensed under the MIT License.
 
 import { assert } from 'chai';
-import * as fs from 'fs-extra';
 import * as path from 'path';
-import * as sinon from 'sinon';
-import { DiscoveryVariants } from '../../../../../client/common/experiments/groups';
-import { traceWarning } from '../../../../../client/common/logger';
+import * as fs from '../../../../../client/common/platform/fs-paths';
 import { FileChangeType } from '../../../../../client/common/platform/fileSystemWatcher';
+import { IDisposable } from '../../../../../client/common/types';
 import { createDeferred, Deferred, sleep } from '../../../../../client/common/utils/async';
 import { getOSType, OSType } from '../../../../../client/common/utils/platform';
-import { IDisposable } from '../../../../../client/common/utils/resourceLifecycle';
+import { traceWarn } from '../../../../../client/logging';
 import { PythonEnvKind } from '../../../../../client/pythonEnvironments/base/info';
 import { BasicEnvInfo, ILocator } from '../../../../../client/pythonEnvironments/base/locator';
 import { getEnvs } from '../../../../../client/pythonEnvironments/base/locatorUtils';
@@ -30,7 +28,7 @@ class Venvs {
 
     public async create(name: string): Promise<{ executable: string; envDir: string }> {
         const envName = this.resolve(name);
-        const argv = [PYTHON_PATH.fileToCommandArgument(), '-m', 'virtualenv', envName];
+        const argv = [PYTHON_PATH.fileToCommandArgumentForPythonExt(), '-m', 'virtualenv', envName];
         try {
             await run(argv, { cwd: this.root });
         } catch (err) {
@@ -81,7 +79,7 @@ class Venvs {
         try {
             await fs.remove(filename);
         } catch (err) {
-            traceWarning(`Failed to clean up ${filename}`);
+            traceWarn(`Failed to clean up ${filename}`);
         }
     }
 
@@ -138,7 +136,6 @@ export function testLocatorWatcher(
     },
 ): void {
     let locator: ILocator<BasicEnvInfo> & IDisposable;
-    let inExperimentStub: sinon.SinonStub;
     const venvs = new Venvs(root);
 
     async function waitForChangeToBeDetected(deferred: Deferred<void>) {
@@ -154,15 +151,12 @@ export function testLocatorWatcher(
         return items.some((item) => externalDeps.arePathsSame(item.executablePath, executable));
     }
 
-    suiteSetup(async () => {
+    suiteSetup(async function () {
+        if (getOSType() === OSType.Linux) {
+            this.skip();
+        }
         await venvs.cleanUp();
     });
-
-    setup(() => {
-        inExperimentStub = sinon.stub(externalDeps, 'inExperiment');
-        inExperimentStub.withArgs(DiscoveryVariants.discoverWithFileWatching).resolves(true);
-    });
-
     async function setupLocator(onChanged: (e: PythonEnvsChangedEvent) => Promise<void>) {
         locator = options?.arg ? await createLocatorFactoryFunc(options.arg) : await createLocatorFactoryFunc();
         locator.onChanged(onChanged);
@@ -172,7 +166,6 @@ export function testLocatorWatcher(
     }
 
     teardown(async () => {
-        sinon.restore();
         if (locator) {
             await locator.dispose();
         }
@@ -194,11 +187,11 @@ export function testLocatorWatcher(
             assert.ok(isFound);
         }
 
-        assert.equal(actualEvent!.type, FileChangeType.Created, 'Wrong event emitted');
+        assert.strictEqual(actualEvent!.type, FileChangeType.Created, 'Wrong event emitted');
         if (options?.kind) {
-            assert.equal(actualEvent!.kind, options.kind, 'Wrong event emitted');
+            assert.strictEqual(actualEvent!.kind, options.kind, 'Wrong event emitted');
         }
-        assert.notEqual(actualEvent!.searchLocation, undefined, 'Wrong event emitted');
+        assert.notStrictEqual(actualEvent!.searchLocation, undefined, 'Wrong event emitted');
         assert.ok(
             externalDeps.arePathsSame(actualEvent!.searchLocation!.fsPath, path.dirname(envDir)),
             'Wrong event emitted',
@@ -228,11 +221,11 @@ export function testLocatorWatcher(
             assert.notOk(isFound);
         }
 
-        assert.notEqual(actualEvent!, undefined, 'Wrong event emitted');
+        assert.notStrictEqual(actualEvent!, undefined, 'Wrong event emitted');
         if (options?.kind) {
-            assert.equal(actualEvent!.kind, options.kind, 'Wrong event emitted');
+            assert.strictEqual(actualEvent!.kind, options.kind, 'Wrong event emitted');
         }
-        assert.notEqual(actualEvent!.searchLocation, undefined, 'Wrong event emitted');
+        assert.notStrictEqual(actualEvent!.searchLocation, undefined, 'Wrong event emitted');
         assert.ok(
             externalDeps.arePathsSame(actualEvent!.searchLocation!.fsPath, path.dirname(envDir)),
             'Wrong event emitted',
@@ -255,11 +248,11 @@ export function testLocatorWatcher(
 
         await venvs.update(executable);
         await waitForChangeToBeDetected(deferred);
-        assert.notEqual(actualEvent!, undefined, 'Event was not emitted');
+        assert.notStrictEqual(actualEvent!, undefined, 'Event was not emitted');
         if (options?.kind) {
-            assert.equal(actualEvent!.kind, options.kind, 'Kind is not as expected');
+            assert.strictEqual(actualEvent!.kind, options.kind, 'Kind is not as expected');
         }
-        assert.notEqual(actualEvent!.searchLocation, undefined, 'Search location is not set');
+        assert.notStrictEqual(actualEvent!.searchLocation, undefined, 'Search location is not set');
         assert.ok(
             externalDeps.arePathsSame(actualEvent!.searchLocation!.fsPath, path.dirname(envDir)),
             `Paths don't match ${actualEvent!.searchLocation!.fsPath} != ${path.dirname(envDir)}`,

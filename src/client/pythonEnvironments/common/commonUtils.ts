@@ -5,19 +5,34 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { convertFileType, DirEntry, FileType, getFileFilter, getFileType } from '../../common/utils/filesystem';
 import { getOSType, OSType } from '../../common/utils/platform';
-import { logError } from '../../logging';
+import { traceError, traceVerbose } from '../../logging';
 import { PythonVersion, UNKNOWN_PYTHON_VERSION } from '../base/info';
 import { comparePythonVersionSpecificity } from '../base/info/env';
 import { parseVersion } from '../base/info/pythonVersion';
 import { getPythonVersionFromConda } from './environmentManagers/conda';
 import { getPythonVersionFromPyvenvCfg } from './environmentManagers/simplevirtualenvs';
-import { normCasePath } from './externalDependencies';
+import { isFile, normCasePath } from './externalDependencies';
 import * as posix from './posixUtils';
 import * as windows from './windowsUtils';
 
-const matchPythonBinFilename =
+const matchStandardPythonBinFilename =
     getOSType() === OSType.Windows ? windows.matchPythonBinFilename : posix.matchPythonBinFilename;
 type FileFilterFunc = (filename: string) => boolean;
+
+/**
+ * Returns `true` if path provided is likely a python executable than a folder path.
+ */
+export async function isPythonExecutable(filePath: string): Promise<boolean> {
+    const isMatch = matchStandardPythonBinFilename(filePath);
+    if (isMatch && getOSType() === OSType.Windows) {
+        // On Windows it's fair to assume a path ending with `.exe` denotes a file.
+        return true;
+    }
+    if (await isFile(filePath)) {
+        return true;
+    }
+    return false;
+}
 
 /**
  * Searches recursively under the given `root` directory for python interpreters.
@@ -64,7 +79,7 @@ export async function* iterPythonExecutablesInDir(
 ): AsyncIterableIterator<DirEntry> {
     const readDirOpts = {
         ...opts,
-        filterFile: matchPythonBinFilename,
+        filterFile: matchStandardPythonBinFilename,
     };
     const entries = await readDirEntries(dirname, readDirOpts);
     for (const entry of entries) {
@@ -117,12 +132,13 @@ async function readDirEntries(
         try {
             basenames = await fs.promises.readdir(dirname);
         } catch (err) {
+            const exception = err as NodeJS.ErrnoException;
             // Treat a missing directory as empty.
-            if (err.code === 'ENOENT') {
+            if (exception.code === 'ENOENT') {
                 return [];
             }
             if (ignoreErrors) {
-                logError(`readdir() failed for "${dirname}" (${err})`);
+                traceError(`readdir() failed for "${dirname}" (${err})`);
                 return [];
             }
             throw err; // re-throw
@@ -142,12 +158,13 @@ async function readDirEntries(
     try {
         raw = await fs.promises.readdir(dirname, { withFileTypes: true });
     } catch (err) {
+        const exception = err as NodeJS.ErrnoException;
         // Treat a missing directory as empty.
-        if (err.code === 'ENOENT') {
+        if (exception.code === 'ENOENT') {
             return [];
         }
         if (ignoreErrors) {
-            logError(`readdir() failed for "${dirname}" (${err})`);
+            traceError(`readdir() failed for "${dirname}" (${err})`);
             return [];
         }
         throw err; // re-throw
@@ -187,7 +204,7 @@ function matchFile(
         return filterFile(filename);
     } catch (err) {
         if (ignoreErrors) {
-            logError(`filter failed for "${filename}" (${err})`);
+            traceError(`filter failed for "${filename}" (${err})`);
             return false;
         }
         throw err; // re-throw
@@ -229,8 +246,11 @@ export async function getPythonVersionFromPath(interpreterPath: string, hint?: s
         versionA = UNKNOWN_PYTHON_VERSION;
     }
     const versionB = interpreterPath ? await getPythonVersionFromNearByFiles(interpreterPath) : UNKNOWN_PYTHON_VERSION;
+    traceVerbose('Best effort version B for', interpreterPath, JSON.stringify(versionB));
     const versionC = interpreterPath ? await getPythonVersionFromPyvenvCfg(interpreterPath) : UNKNOWN_PYTHON_VERSION;
+    traceVerbose('Best effort version C for', interpreterPath, JSON.stringify(versionC));
     const versionD = interpreterPath ? await getPythonVersionFromConda(interpreterPath) : UNKNOWN_PYTHON_VERSION;
+    traceVerbose('Best effort version D for', interpreterPath, JSON.stringify(versionD));
 
     let version = UNKNOWN_PYTHON_VERSION;
     for (const v of [versionA, versionB, versionC, versionD]) {
@@ -249,7 +269,7 @@ async function checkPythonExecutable(
         filterFile?: (f: string | DirEntry) => Promise<boolean>;
     },
 ): Promise<boolean> {
-    const matchFilename = opts.matchFilename || matchPythonBinFilename;
+    const matchFilename = opts.matchFilename || matchStandardPythonBinFilename;
     const filename = typeof executable === 'string' ? executable : executable.filename;
 
     if (!matchFilename(filename)) {

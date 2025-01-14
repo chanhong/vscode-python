@@ -4,7 +4,6 @@
 import { IExtensionActivationService } from '../activation/types';
 import { IServiceManager } from '../ioc/types';
 import { DebugLauncher } from './common/debugLauncher';
-import { TestRunner } from './common/runner';
 import { TestConfigSettingsService } from './common/configSettingService';
 import { TestsHelper } from './common/testUtils';
 import {
@@ -12,25 +11,18 @@ import {
     ITestConfigurationManagerFactory,
     ITestConfigurationService,
     ITestDebugLauncher,
-    ITestRunner,
     ITestsHelper,
-    IUnitTestSocketServer,
 } from './common/types';
-import { UpdateTestSettingService } from './common/updateTestSettings';
 import { UnitTestConfigurationService } from './configuration';
 import { TestConfigurationManagerFactory } from './configurationFactory';
 import { TestingService, UnitTestManagementService } from './main';
 import { ITestingService } from './types';
-import { UnitTestSocketServer } from './common/socketServer';
 import { registerTestControllerTypes } from './testController/serviceRegistry';
 
 export function registerTypes(serviceManager: IServiceManager) {
     serviceManager.addSingleton<ITestDebugLauncher>(ITestDebugLauncher, DebugLauncher);
 
     serviceManager.add<ITestsHelper>(ITestsHelper, TestsHelper);
-    serviceManager.add<IUnitTestSocketServer>(IUnitTestSocketServer, UnitTestSocketServer);
-
-    serviceManager.add<ITestRunner>(ITestRunner, TestRunner);
 
     serviceManager.addSingleton<ITestConfigurationService>(ITestConfigurationService, UnitTestConfigurationService);
     serviceManager.addSingleton<ITestingService>(ITestingService, TestingService);
@@ -40,7 +32,6 @@ export function registerTypes(serviceManager: IServiceManager) {
         ITestConfigurationManagerFactory,
         TestConfigurationManagerFactory,
     );
-    serviceManager.addSingleton<IExtensionActivationService>(IExtensionActivationService, UpdateTestSettingService);
     serviceManager.addSingleton<IExtensionActivationService>(IExtensionActivationService, UnitTestManagementService);
 
     registerTestControllerTypes(serviceManager);

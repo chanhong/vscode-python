@@ -33,10 +33,15 @@ suite('Shell Detectors', () => {
     shellPathsAndIdentification.set('c:\\windows\\system32\\wsl.exe', TerminalShellType.wsl);
     shellPathsAndIdentification.set('c:\\windows\\system32\\gitbash.exe', TerminalShellType.gitbash);
     shellPathsAndIdentification.set('/usr/bin/bash', TerminalShellType.bash);
+    shellPathsAndIdentification.set('c:\\cygwin\\bin\\bash.exe', TerminalShellType.bash);
+    shellPathsAndIdentification.set('c:\\cygwin64\\bin\\bash.exe', TerminalShellType.bash);
     shellPathsAndIdentification.set('/usr/bin/zsh', TerminalShellType.zsh);
+    shellPathsAndIdentification.set('c:\\cygwin\\bin\\zsh.exe', TerminalShellType.zsh);
+    shellPathsAndIdentification.set('c:\\cygwin64\\bin\\zsh.exe', TerminalShellType.zsh);
     shellPathsAndIdentification.set('/usr/bin/ksh', TerminalShellType.ksh);
     shellPathsAndIdentification.set('c:\\windows\\system32\\powershell.exe', TerminalShellType.powershell);
     shellPathsAndIdentification.set('c:\\windows\\system32\\pwsh.exe', TerminalShellType.powershellCore);
+    shellPathsAndIdentification.set('C:\\Program Files\\nu\\bin\\nu.EXE', TerminalShellType.nushell);
     shellPathsAndIdentification.set('/usr/microsoft/xxx/powershell/powershell', TerminalShellType.powershell);
     shellPathsAndIdentification.set('/usr/microsoft/xxx/powershell/pwsh', TerminalShellType.powershellCore);
     shellPathsAndIdentification.set('/usr/bin/fish', TerminalShellType.fish);
@@ -47,15 +52,16 @@ suite('Shell Detectors', () => {
     shellPathsAndIdentification.set('/usr/bin/xonsh', TerminalShellType.xonsh);
     shellPathsAndIdentification.set('/usr/bin/xonshx', TerminalShellType.other);
 
-    const telemetryProperties: ShellIdentificationTelemetry = {
-        failed: true,
-        shellIdentificationSource: 'default',
-        terminalProvided: false,
-        hasCustomShell: undefined,
-        hasShellInEnv: undefined,
-    };
+    let telemetryProperties: ShellIdentificationTelemetry;
 
     setup(() => {
+        telemetryProperties = {
+            failed: true,
+            shellIdentificationSource: 'default',
+            terminalProvided: false,
+            hasCustomShell: undefined,
+            hasShellInEnv: undefined,
+        };
         platformService = mock(PlatformService);
         workspaceService = mock(WorkspaceService);
         currentProcess = mock(CurrentProcess);
@@ -118,6 +124,7 @@ suite('Shell Detectors', () => {
             undefined,
             'Should be undefined when vscode.env.shell is undefined',
         );
+        expect(telemetryProperties.failed).to.equal(false);
     });
     test('Identify shell based on VSC Settings', async () => {
         const shellDetector = new SettingsShellDetector(instance(workspaceService), instance(platformService));

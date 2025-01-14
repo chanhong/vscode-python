@@ -20,13 +20,14 @@ const nativeDependencyChecker = require('node-has-native-dependencies');
 const flat = require('flat');
 const { argv } = require('yargs');
 const os = require('os');
-const rmrf = require('rimraf');
+const typescript = require('typescript');
+
+const tsProject = ts.createProject('./tsconfig.json', { typescript });
 
 const isCI = process.env.TRAVIS === 'true' || process.env.TF_BUILD !== undefined;
 
-gulp.task('compile', (done) => {
+gulp.task('compileCore', (done) => {
     let failed = false;
-    const tsProject = ts.createProject('tsconfig.json');
     tsProject
         .src()
         .pipe(tsProject())
@@ -36,6 +37,23 @@ gulp.task('compile', (done) => {
         .js.pipe(gulp.dest('out'))
         .on('finish', () => (failed ? done(new Error('TypeScript compilation errors')) : done()));
 });
+
+gulp.task('compileApi', (done) => {
+    spawnAsync('npm', ['run', 'compileApi'], undefined, true)
+        .then((stdout) => {
+            if (stdout.includes('error')) {
+                done(new Error(stdout));
+            } else {
+                done();
+            }
+        })
+        .catch((ex) => {
+            console.log(ex);
+            done(new Error('TypeScript compilation errors', ex));
+        });
+});
+
+gulp.task('compile', gulp.series('compileCore', 'compileApi'));
 
 gulp.task('precommit', (done) => run({ exitOnError: true, mode: 'staged' }, done));
 
@@ -80,8 +98,12 @@ async function addExtensionPackDependencies() {
     // extension dependencies need not be installed during development
     const packageJsonContents = await fsExtra.readFile('package.json', 'utf-8');
     const packageJson = JSON.parse(packageJsonContents);
-    packageJson.extensionPack = ['ms-toolsai.jupyter', 'ms-python.vscode-pylance'].concat(
+    packageJson.extensionPack = ['ms-python.vscode-pylance', 'ms-python.debugpy'].concat(
         packageJson.extensionPack ? packageJson.extensionPack : [],
+    );
+    // Remove potential duplicates.
+    packageJson.extensionPack = packageJson.extensionPack.filter(
+        (item, index) => packageJson.extensionPack.indexOf(item) === index,
     );
     await fsExtra.writeFile('package.json', JSON.stringify(packageJson, null, 4), 'utf-8');
 }
@@ -173,8 +195,6 @@ function getAllowedWarningsForWebPack(buildConfig) {
                 'WARNING in webpack performance recommendations:',
                 'WARNING in ./node_modules/encoding/lib/iconv-loader.js',
                 'WARNING in ./node_modules/any-promise/register.js',
-                'WARNING in ./node_modules/log4js/lib/appenders/index.js',
-                'WARNING in ./node_modules/log4js/lib/clustering.js',
                 'WARNING in ./node_modules/diagnostic-channel-publishers/dist/src/azure-coretracing.pub.js',
                 'WARNING in ./node_modules/applicationinsights/out/AutoCollection/NativePerformance.js',
             ];
@@ -202,12 +222,6 @@ function getAllowedWarningsForWebPack(buildConfig) {
             throw new Error('Unknown WebPack Configuration');
     }
 }
-gulp.task('renameSourceMaps', async () => {
-    // By default source maps will be disabled in the extension.
-    // Users will need to use the command `python.enableSourceMapSupport` to enable source maps.
-    const extensionSourceMap = path.join(__dirname, 'out', 'client', 'extension.js.map');
-    await fsExtra.rename(extensionSourceMap, `${extensionSourceMap}.disabled`);
-});
 
 gulp.task('verifyBundle', async () => {
     const matches = await glob.sync(path.join(__dirname, '*.vsix'));
@@ -218,120 +232,9 @@ gulp.task('verifyBundle', async () => {
     }
 });
 
-gulp.task('prePublishBundle', gulp.series('webpack', 'renameSourceMaps'));
+gulp.task('prePublishBundle', gulp.series('webpack'));
 gulp.task('checkDependencies', gulp.series('checkNativeDependencies'));
 gulp.task('prePublishNonBundle', gulp.series('compile'));
-
-gulp.task('installPythonRequirements', async () => {
-    let args = [
-        '-m',
-        'pip',
-        '--disable-pip-version-check',
-        'install',
-        '--no-user',
-        '-t',
-        './pythonFiles/lib/python',
-        '--no-cache-dir',
-        '--implementation',
-        'py',
-        '--no-deps',
-        '--upgrade',
-        '-r',
-        './requirements.txt',
-    ];
-    let success = await spawnAsync(process.env.CI_PYTHON_PATH || 'python3', args, undefined, true)
-        .then(() => true)
-        .catch((ex) => {
-            console.error("Failed to install Python Libs using 'python3'", ex);
-            return false;
-        });
-    if (!success) {
-        console.info("Failed to install Python Libs using 'python3', attempting to install using 'python'");
-        await spawnAsync('python', args).catch((ex) =>
-            console.error("Failed to install Python Libs using 'python'", ex),
-        );
-        return;
-    }
-
-    args = [
-        '-m',
-        'pip',
-        '--disable-pip-version-check',
-        'install',
-        '--no-user',
-        '-t',
-        './pythonFiles/lib/jedilsp',
-        '--no-cache-dir',
-        '--implementation',
-        'py',
-        '--no-deps',
-        '--upgrade',
-        '-r',
-        './jedils_requirements.txt',
-    ];
-    success = await spawnAsync(process.env.CI_PYTHON_PATH || 'python3', args, undefined, true)
-        .then(() => true)
-        .catch((ex) => {
-            console.error("Failed to install Python Libs using 'python3'", ex);
-            return false;
-        });
-    if (!success) {
-        console.info("Failed to install Python Libs using 'python3', attempting to install using 'python'");
-        await spawnAsync('python', args).catch((ex) =>
-            console.error("Failed to install Python Libs using 'python'", ex),
-        );
-    }
-});
-
-// See https://github.com/microsoft/vscode-python/issues/7136
-gulp.task('installDebugpy', async () => {
-    // Install dependencies needed for 'install_debugpy.py'
-    const depsArgs = [
-        '-m',
-        'pip',
-        '--disable-pip-version-check',
-        'install',
-        '--no-user',
-        '-t',
-        './pythonFiles/lib/temp',
-        '-r',
-        './build/debugger-install-requirements.txt',
-    ];
-    const successWithWheelsDeps = await spawnAsync(process.env.CI_PYTHON_PATH || 'python3', depsArgs, undefined, true)
-        .then(() => true)
-        .catch((ex) => {
-            console.error("Failed to install new DEBUGPY wheels using 'python3'", ex);
-            return false;
-        });
-    if (!successWithWheelsDeps) {
-        console.info(
-            "Failed to install dependencies need by 'install_debugpy.py' using 'python3', attempting to install using 'python'",
-        );
-        await spawnAsync('python', depsArgs).catch((ex) =>
-            console.error("Failed to install dependencies need by 'install_debugpy.py' using 'python'", ex),
-        );
-    }
-
-    // Install new DEBUGPY with wheels for python 3.7
-    const wheelsArgs = ['./pythonFiles/install_debugpy.py'];
-    const wheelsEnv = { PYTHONPATH: './pythonFiles/lib/temp' };
-    const successWithWheels = await spawnAsync(process.env.CI_PYTHON_PATH || 'python3', wheelsArgs, wheelsEnv, true)
-        .then(() => true)
-        .catch((ex) => {
-            console.error("Failed to install new DEBUGPY wheels using 'python3'", ex);
-            return false;
-        });
-    if (!successWithWheels) {
-        console.info("Failed to install new DEBUGPY wheels using 'python3', attempting to install using 'python'");
-        await spawnAsync('python', wheelsArgs, wheelsEnv).catch((ex) =>
-            console.error("Failed to install DEBUGPY wheels using 'python'", ex),
-        );
-    }
-
-    rmrf.sync('./pythonFiles/lib/temp');
-});
-
-gulp.task('installPythonLibs', gulp.series('installPythonRequirements', 'installDebugpy'));
 
 function spawnAsync(command, args, env, rejectOnStdErr = false) {
     env = env || {};

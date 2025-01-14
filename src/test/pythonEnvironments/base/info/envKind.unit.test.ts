@@ -10,11 +10,11 @@ import { getKindDisplayName, getPrioritizedEnvKinds } from '../../../../client/p
 const KIND_NAMES: [PythonEnvKind, string][] = [
     // We handle PythonEnvKind.Unknown separately.
     [PythonEnvKind.System, 'system'],
-    [PythonEnvKind.MacDefault, 'macDefault'],
-    [PythonEnvKind.WindowsStore, 'winStore'],
+    [PythonEnvKind.MicrosoftStore, 'winStore'],
     [PythonEnvKind.Pyenv, 'pyenv'],
-    [PythonEnvKind.CondaBase, 'condaBase'],
     [PythonEnvKind.Poetry, 'poetry'],
+    [PythonEnvKind.Hatch, 'hatch'],
+    [PythonEnvKind.Pixi, 'pixi'],
     [PythonEnvKind.Custom, 'customGlobal'],
     [PythonEnvKind.OtherGlobal, 'otherGlobal'],
     [PythonEnvKind.Venv, 'venv'],
@@ -22,12 +22,13 @@ const KIND_NAMES: [PythonEnvKind, string][] = [
     [PythonEnvKind.VirtualEnvWrapper, 'virtualenvWrapper'],
     [PythonEnvKind.Pipenv, 'pipenv'],
     [PythonEnvKind.Conda, 'conda'],
+    [PythonEnvKind.ActiveState, 'activestate'],
     [PythonEnvKind.OtherVirtual, 'otherVirtual'],
 ];
 
 suite('pyenvs info - PyEnvKind', () => {
     test('all Python env kinds are covered', () => {
-        assert.equal(
+        assert.strictEqual(
             KIND_NAMES.length,
             // We ignore PythonEnvKind.Unknown.
             getNamesAndValues(PythonEnvKind).length - 1,
@@ -43,7 +44,7 @@ suite('pyenvs info - PyEnvKind', () => {
                 test(`check ${kind}`, () => {
                     const name = getKindDisplayName(kind);
 
-                    assert.notEqual(name, '');
+                    assert.notStrictEqual(name, '');
                 });
             });
         });
@@ -58,7 +59,7 @@ suite('pyenvs info - PyEnvKind', () => {
                 test(`check ${kind}`, () => {
                     const name = getKindDisplayName(kind);
 
-                    assert.equal(name, '');
+                    assert.strictEqual(name, '');
                 });
             });
         });
@@ -69,7 +70,7 @@ suite('pyenvs info - PyEnvKind', () => {
             const numPrioritized = getPrioritizedEnvKinds().length;
             const numNames = getNamesAndValues(PythonEnvKind).length;
 
-            assert.equal(numPrioritized, numNames);
+            assert.strictEqual(numPrioritized, numNames);
         });
     });
 });

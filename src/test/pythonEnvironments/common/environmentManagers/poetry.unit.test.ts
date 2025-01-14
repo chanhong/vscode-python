@@ -106,7 +106,7 @@ suite('Poetry binary is located correctly', async () => {
 
         const poetry = await Poetry.getPoetry(testPoetryDir);
 
-        expect(poetry?._command).to.equal(undefined);
+        expect(poetry?.command).to.equal(undefined);
     });
 
     test('Return undefined if cwd contains pyproject.toml which does not contain a poetry section', async () => {
@@ -117,16 +117,17 @@ suite('Poetry binary is located correctly', async () => {
 
         const poetry = await Poetry.getPoetry(project3);
 
-        expect(poetry?._command).to.equal(undefined);
+        expect(poetry?.command).to.equal(undefined);
     });
 
     test('When user has specified a valid poetry path, use it', async () => {
         getPythonSetting.returns('poetryPath');
         shellExecute.callsFake((command: string, options: ShellOptions) => {
+            const cwd = typeof options.cwd === 'string' ? options.cwd : options.cwd?.toString();
             if (
                 command === `poetryPath env list --full-path` &&
-                options.cwd &&
-                externalDependencies.arePathsSame(options.cwd, project1)
+                cwd &&
+                externalDependencies.arePathsSame(cwd, project1)
             ) {
                 return Promise.resolve<ExecutionResult<string>>({ stdout: '' });
             }
@@ -135,17 +136,14 @@ suite('Poetry binary is located correctly', async () => {
 
         const poetry = await Poetry.getPoetry(project1);
 
-        expect(poetry?._command).to.equal('poetryPath');
+        expect(poetry?.command).to.equal('poetryPath');
     });
 
     test("When user hasn't specified a path, use poetry on PATH if available", async () => {
         getPythonSetting.returns('poetry'); // Setting returns the default value
         shellExecute.callsFake((command: string, options: ShellOptions) => {
-            if (
-                command === `poetry env list --full-path` &&
-                options.cwd &&
-                externalDependencies.arePathsSame(options.cwd, project1)
-            ) {
+            const cwd = typeof options.cwd === 'string' ? options.cwd : options.cwd?.toString();
+            if (command === `poetry env list --full-path` && cwd && externalDependencies.arePathsSame(cwd, project1)) {
                 return Promise.resolve<ExecutionResult<string>>({ stdout: '' });
             }
             return Promise.reject(new Error('Command failed'));
@@ -153,7 +151,7 @@ suite('Poetry binary is located correctly', async () => {
 
         const poetry = await Poetry.getPoetry(project1);
 
-        expect(poetry?._command).to.equal('poetry');
+        expect(poetry?.command).to.equal('poetry');
     });
 
     test('When poetry is not available on PATH, try using the default poetry location if valid', async () => {
@@ -168,10 +166,11 @@ suite('Poetry binary is located correctly', async () => {
         pathExistsSync.callThrough();
         getPythonSetting.returns('poetry');
         shellExecute.callsFake((command: string, options: ShellOptions) => {
+            const cwd = typeof options.cwd === 'string' ? options.cwd : options.cwd?.toString();
             if (
                 command === `${defaultPoetry} env list --full-path` &&
-                options.cwd &&
-                externalDependencies.arePathsSame(options.cwd, project1)
+                cwd &&
+                externalDependencies.arePathsSame(cwd, project1)
             ) {
                 return Promise.resolve<ExecutionResult<string>>({ stdout: '' });
             }
@@ -180,7 +179,7 @@ suite('Poetry binary is located correctly', async () => {
 
         const poetry = await Poetry.getPoetry(project1);
 
-        expect(poetry?._command).to.equal(defaultPoetry);
+        expect(poetry?.command).to.equal(defaultPoetry);
     });
 
     test('Return undefined otherwise', async () => {
@@ -191,6 +190,6 @@ suite('Poetry binary is located correctly', async () => {
 
         const poetry = await Poetry.getPoetry(project1);
 
-        expect(poetry?._command).to.equal(undefined);
+        expect(poetry?.command).to.equal(undefined);
     });
 });

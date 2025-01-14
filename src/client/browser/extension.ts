@@ -2,66 +2,95 @@
 // Licensed under the MIT License.
 
 import * as vscode from 'vscode';
-import TelemetryReporter from 'vscode-extension-telemetry';
-import { LanguageClientOptions, State } from 'vscode-languageclient';
+import TelemetryReporter from '@vscode/extension-telemetry';
+import { LanguageClientOptions } from 'vscode-languageclient';
 import { LanguageClient } from 'vscode-languageclient/browser';
 import { LanguageClientMiddlewareBase } from '../activation/languageClientMiddlewareBase';
-import { ILSExtensionApi } from '../activation/node/languageServerFolderService';
 import { LanguageServerType } from '../activation/types';
-import { AppinsightsKey, PVSC_EXTENSION_ID, PYLANCE_EXTENSION_ID } from '../common/constants';
+import { AppinsightsKey, PYLANCE_EXTENSION_ID } from '../common/constants';
 import { EventName } from '../telemetry/constants';
+import { createStatusItem } from './intellisenseStatus';
+import { PylanceApi } from '../activation/node/pylanceApi';
+import { buildApi, IBrowserExtensionApi } from './api';
 
 interface BrowserConfig {
     distUrl: string; // URL to Pylance's dist folder.
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    // Run in a promise and return early so that VS Code can go activate Pylance.
+let languageClient: LanguageClient | undefined;
+let pylanceApi: PylanceApi | undefined;
 
-    const pylanceExtension = vscode.extensions.getExtension<ILSExtensionApi>(PYLANCE_EXTENSION_ID);
+export function activate(context: vscode.ExtensionContext): Promise<IBrowserExtensionApi> {
+    const reporter = getTelemetryReporter();
+
+    const activationPromise = Promise.resolve(buildApi(reporter));
+    const pylanceExtension = vscode.extensions.getExtension<PylanceApi>(PYLANCE_EXTENSION_ID);
     if (pylanceExtension) {
-        runPylance(context, pylanceExtension);
-        return;
+        // Make sure we run pylance once we activated core extension.
+        activationPromise.then(() => runPylance(context, pylanceExtension));
+        return activationPromise;
     }
 
-    const changeDisposable = vscode.extensions.onDidChange(() => {
-        const newPylanceExtension = vscode.extensions.getExtension<ILSExtensionApi>(PYLANCE_EXTENSION_ID);
+    const changeDisposable = vscode.extensions.onDidChange(async () => {
+        const newPylanceExtension = vscode.extensions.getExtension<PylanceApi>(PYLANCE_EXTENSION_ID);
         if (newPylanceExtension) {
             changeDisposable.dispose();
-            runPylance(context, newPylanceExtension);
+            await runPylance(context, newPylanceExtension);
         }
     });
+
+    return activationPromise;
+}
+
+export async function deactivate(): Promise<void> {
+    if (pylanceApi) {
+        const api = pylanceApi;
+        pylanceApi = undefined;
+        await api.client!.stop();
+    }
+
+    if (languageClient) {
+        const client = languageClient;
+        languageClient = undefined;
+
+        await client.stop();
+        await client.dispose();
+    }
 }
 
 async function runPylance(
     context: vscode.ExtensionContext,
-    pylanceExtension: vscode.Extension<ILSExtensionApi>,
+    pylanceExtension: vscode.Extension<PylanceApi>,
 ): Promise<void> {
-    const pylanceApi = await pylanceExtension.activate();
-    if (!pylanceApi.languageServerFolder) {
-        throw new Error('Could not find Pylance extension');
+    context.subscriptions.push(createStatusItem());
+
+    pylanceExtension = await getActivatedExtension(pylanceExtension);
+    const api = pylanceExtension.exports;
+    if (api.client && api.client.isEnabled()) {
+        pylanceApi = api;
+        await api.client.start();
+        return;
     }
 
-    const { path: distUrl, version } = await pylanceApi.languageServerFolder();
+    const { extensionUri, packageJSON } = pylanceExtension;
+    const distUrl = vscode.Uri.joinPath(extensionUri, 'dist');
 
     try {
-        const worker = new Worker(`${distUrl}/browser.server.bundle.js`);
+        const worker = new Worker(vscode.Uri.joinPath(distUrl, 'browser.server.bundle.js').toString());
 
         // Pass the configuration as the first message to the worker so it can
         // have info like the URL of the dist folder early enough.
         //
         // This is the same method used by the TS worker:
         // https://github.com/microsoft/vscode/blob/90aa979bb75a795fd8c33d38aee263ea655270d0/extensions/typescript-language-features/src/tsServer/serverProcess.browser.ts#L55
-        const config: BrowserConfig = {
-            distUrl,
-        };
+        const config: BrowserConfig = { distUrl: distUrl.toString() };
         worker.postMessage(config);
 
         const middleware = new LanguageClientMiddlewareBase(
             undefined,
             LanguageServerType.Node,
             sendTelemetryEventBrowser,
-            version,
+            packageJSON.version,
         );
         middleware.connect();
 
@@ -74,32 +103,29 @@ async function runPylance(
             ],
             synchronize: {
                 // Synchronize the setting section to the server.
-                configurationSection: ['python'],
+                configurationSection: ['python', 'jupyter.runStartupCommands'],
             },
             middleware,
         };
 
-        const languageClient = new LanguageClient('python', 'Python Language Server', clientOptions, worker);
+        const client = new LanguageClient('python', 'Python Language Server', worker, clientOptions);
+        languageClient = client;
 
-        languageClient.onDidChangeState((e) => {
-            // The client's on* methods must be called after the client has started, but if called too
-            // late the server may have already sent a message (which leads to failures). Register
-            // these on the state change to running to ensure they are ready soon enough.
-            if (e.newState !== State.Running) {
-                return;
-            }
+        context.subscriptions.push(
+            vscode.commands.registerCommand('python.viewLanguageServerOutput', () => client.outputChannel.show()),
+        );
 
-            context.subscriptions.push(
-                vscode.commands.registerCommand('python.viewLanguageServerOutput', () =>
-                    languageClient.outputChannel.show(),
-                ),
-            );
-
-            languageClient.onTelemetry((telemetryEvent) => {
+        client.onTelemetry(
+            (telemetryEvent: {
+                EventName: EventName;
+                Properties: { method: string };
+                Measurements: number | Record<string, number> | undefined;
+                Exception: Error | undefined;
+            }) => {
                 const eventName = telemetryEvent.EventName || EventName.LANGUAGE_SERVER_TELEMETRY;
                 const formattedProperties = {
                     ...telemetryEvent.Properties,
-                    // Replace all slashes in the method name so it doesn't get scrubbed by vscode-extension-telemetry.
+                    // Replace all slashes in the method name so it doesn't get scrubbed by @vscode/extension-telemetry.
                     method: telemetryEvent.Properties.method?.replace(/\//g, '.'),
                 };
                 sendTelemetryEventBrowser(
@@ -108,14 +134,12 @@ async function runPylance(
                     formattedProperties,
                     telemetryEvent.Exception,
                 );
-            });
-        });
+            },
+        );
 
-        const disposable = languageClient.start();
-
-        context.subscriptions.push(disposable);
+        await client.start();
     } catch (e) {
-        console.log(e);
+        console.log(e); // necessary to use console.log for browser
     }
 }
 
@@ -127,16 +151,14 @@ function getTelemetryReporter() {
     if (telemetryReporter) {
         return telemetryReporter;
     }
-    const extensionId = PVSC_EXTENSION_ID;
 
     // eslint-disable-next-line global-require
-    const { extensions } = require('vscode') as typeof import('vscode');
-    const extension = extensions.getExtension(extensionId)!;
-    const extensionVersion = extension.packageJSON.version;
-
-    // eslint-disable-next-line global-require
-    const Reporter = require('vscode-extension-telemetry').default as typeof TelemetryReporter;
-    telemetryReporter = new Reporter(extensionId, extensionVersion, AppinsightsKey, true);
+    const Reporter = require('@vscode/extension-telemetry').default as typeof TelemetryReporter;
+    telemetryReporter = new Reporter(AppinsightsKey, [
+        {
+            lookup: /(errorName|errorMessage|errorStack)/g,
+        },
+    ]);
 
     return telemetryReporter;
 }
@@ -178,7 +200,7 @@ function sendTelemetryEventBrowser(
                         break;
                 }
             } catch (exception) {
-                console.error(`Failed to serialize ${prop} for ${eventName}`, exception);
+                console.error(`Failed to serialize ${prop} for ${eventName}`, exception); // necessary to use console.log for browser
             }
         });
     }
@@ -190,23 +212,20 @@ function sendTelemetryEventBrowser(
     if (ex) {
         const errorProps = {
             errorName: ex.name,
-            errorMessage: ex.message,
             errorStack: ex.stack ?? '',
         };
         Object.assign(customProperties, errorProps);
 
-        // To avoid hardcoding the names and forgetting to update later.
-        const errorPropNames = Object.getOwnPropertyNames(errorProps);
-        reporter.sendTelemetryErrorEvent(eventNameSent, customProperties, measures, errorPropNames);
+        reporter.sendTelemetryErrorEvent(eventNameSent, customProperties, measures);
     } else {
         reporter.sendTelemetryEvent(eventNameSent, customProperties, measures);
     }
+}
 
-    if (process.env && process.env.VSC_PYTHON_LOG_TELEMETRY) {
-        console.error(
-            `Telemetry Event : ${eventNameSent} Measures: ${JSON.stringify(measures)} Props: ${JSON.stringify(
-                customProperties,
-            )} `,
-        );
+async function getActivatedExtension<T>(extension: vscode.Extension<T>): Promise<vscode.Extension<T>> {
+    if (!extension.isActive) {
+        await extension.activate();
     }
+
+    return extension;
 }

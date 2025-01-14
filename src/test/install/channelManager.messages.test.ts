@@ -21,6 +21,7 @@ import { ServiceManager } from '../../client/ioc/serviceManager';
 import { IServiceContainer } from '../../client/ioc/types';
 import { EnvironmentType, PythonEnvironment } from '../../client/pythonEnvironments/info';
 import { MockAutoSelectionService } from '../mocks/autoSelector';
+import { createTypeMoq } from '../mocks/helper';
 
 const info: PythonEnvironment = {
     architecture: Architecture.Unknown,
@@ -45,16 +46,16 @@ suite('Installation - channel messages', () => {
         const serviceManager = new ServiceManager(cont);
         serviceContainer = new ServiceContainer(cont);
 
-        platform = TypeMoq.Mock.ofType<IPlatformService>();
+        platform = createTypeMoq<IPlatformService>();
         serviceManager.addSingletonInstance<IPlatformService>(IPlatformService, platform.object);
 
-        appShell = TypeMoq.Mock.ofType<IApplicationShell>();
+        appShell = createTypeMoq<IApplicationShell>();
         serviceManager.addSingletonInstance<IApplicationShell>(IApplicationShell, appShell.object);
 
-        interpreters = TypeMoq.Mock.ofType<IInterpreterService>();
+        interpreters = createTypeMoq<IInterpreterService>();
         serviceManager.addSingletonInstance<IInterpreterService>(IInterpreterService, interpreters.object);
 
-        const moduleInstaller = TypeMoq.Mock.ofType<IModuleInstaller>();
+        const moduleInstaller = createTypeMoq<IModuleInstaller>();
         serviceManager.addSingletonInstance<IModuleInstaller>(IModuleInstaller, moduleInstaller.object);
         serviceManager.addSingleton<IInterpreterAutoSelectionService>(
             IInterpreterAutoSelectionService,
@@ -134,17 +135,17 @@ suite('Installation - channel messages', () => {
 
     function verifyMessage(message: string, present: string[], missing: string[]) {
         for (const p of present) {
-            assert.equal(message.indexOf(p) >= 0, true, `Message does not contain ${p}.`);
+            assert.strictEqual(message.indexOf(p) >= 0, true, `Message does not contain ${p}.`);
         }
         for (const m of missing) {
-            assert.equal(message.indexOf(m) < 0, true, `Message incorrectly contains ${m}.`);
+            assert.strictEqual(message.indexOf(m) < 0, true, `Message incorrectly contains ${m}.`);
         }
     }
 
     function verifyUrl(url: string, terms: string[]) {
-        assert.equal(url.indexOf('https://') >= 0, true, 'Search Url must be https.');
+        assert.strictEqual(url.indexOf('https://') >= 0, true, 'Search Url must be https.');
         for (const term of terms) {
-            assert.equal(url.indexOf(term) >= 0, true, `Search Url does not contain ${term}.`);
+            assert.strictEqual(url.indexOf(term) >= 0, true, `Search Url does not contain ${term}.`);
         }
     }
 
@@ -185,7 +186,7 @@ suite('Installation - channel messages', () => {
         if (methodType === 'showNoInstallersMessage') {
             await channels.showNoInstallersMessage();
         } else {
-            await channels.getInstallationChannel(Product.pylint);
+            await channels.getInstallationChannel(Product.pytest);
         }
         await verify(message, url);
     }

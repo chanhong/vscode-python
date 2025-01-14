@@ -4,14 +4,22 @@
 'use strict';
 
 import * as path from 'path';
-import { traceError, traceVerbose } from '../../../common/logger';
 import { getOSType, getUserHomeDir, OSType } from '../../../common/utils/platform';
-import { getPythonSetting, isParentPath, pathExistsSync, readFileSync, shellExecute } from '../externalDependencies';
+import {
+    getPythonSetting,
+    isParentPath,
+    pathExists,
+    pathExistsSync,
+    readFile,
+    shellExecute,
+} from '../externalDependencies';
 import { getEnvironmentDirFromPath } from '../commonUtils';
 import { isVirtualenvEnvironment } from './simplevirtualenvs';
 import { StopWatch } from '../../../common/utils/stopWatch';
 import { cache } from '../../../common/utils/decorators';
 import { isTestExecution } from '../../../common/constants';
+import { traceError, traceVerbose } from '../../../logging';
+import { splitLines } from '../../../common/stringUtils';
 
 /**
  * Global virtual env dir for a project is named as:
@@ -55,7 +63,7 @@ async function isLocalPoetryEnvironment(interpreterPath: string): Promise<boolea
         return false;
     }
     const project = path.dirname(envDir);
-    if (!hasValidPyprojectToml(project)) {
+    if (!(await hasValidPyprojectToml(project))) {
         return false;
     }
     // The assumption is that we need to be able to run poetry CLI for an environment in order to mark it as poetry.
@@ -84,6 +92,8 @@ export async function isPoetryEnvironment(interpreterPath: string): Promise<bool
     return false;
 }
 
+const POETRY_TIMEOUT = 50000;
+
 /** Wraps the "poetry" utility, and exposes its functionality.
  */
 export class Poetry {
@@ -99,11 +109,11 @@ export class Poetry {
     /**
      * Creates a Poetry service corresponding to the corresponding "poetry" command.
      *
-     * @param _command - Command used to run poetry. This has the same meaning as the
+     * @param command - Command used to run poetry. This has the same meaning as the
      * first argument of spawn() - i.e. it can be a full path, or just a binary name.
      * @param cwd - The working directory to use as cwd when running poetry.
      */
-    constructor(public readonly _command: string, private cwd: string) {
+    constructor(public readonly command: string, private cwd: string) {
         this.fixCwd();
     }
 
@@ -116,11 +126,10 @@ export class Poetry {
      */
     public static async getPoetry(cwd: string): Promise<Poetry | undefined> {
         // Following check should be performed synchronously so we trigger poetry execution as soon as possible.
-        if (!hasValidPyprojectToml(cwd)) {
+        if (!(await hasValidPyprojectToml(cwd))) {
             // This check is not expensive and may change during a session, so we need not cache it.
             return undefined;
         }
-        traceVerbose(`Getting poetry for cwd ${cwd}`);
         if (Poetry.poetryPromise.get(cwd) === undefined || isTestExecution()) {
             Poetry.poetryPromise.set(cwd, Poetry.locate(cwd));
         }
@@ -131,12 +140,17 @@ export class Poetry {
         // First thing this method awaits on should be poetry command execution, hence perform all operations
         // before that synchronously.
 
+        traceVerbose(`Getting poetry for cwd ${cwd}`);
         // Produce a list of candidate binaries to be probed by exec'ing them.
         function* getCandidates() {
-            const customPoetryPath = getPythonSetting<string>('poetryPath');
-            if (customPoetryPath && customPoetryPath !== 'poetry') {
-                // If user has specified a custom poetry path, use it first.
-                yield customPoetryPath;
+            try {
+                const customPoetryPath = getPythonSetting<string>('poetryPath');
+                if (customPoetryPath && customPoetryPath !== 'poetry') {
+                    // If user has specified a custom poetry path, use it first.
+                    yield customPoetryPath;
+                }
+            } catch (ex) {
+                traceError(`Failed to get poetry setting`, ex);
             }
             // Check unqualified filename, in case it's on PATH.
             yield 'poetry';
@@ -158,6 +172,7 @@ export class Poetry {
                 traceVerbose(`Found poetry via filesystem probing for ${cwd}: ${poetryPath}`);
                 return poetry;
             }
+            traceVerbose(`Failed to find poetry for ${cwd}: ${poetryPath}`);
         }
 
         // Didn't find anything.
@@ -184,7 +199,7 @@ export class Poetry {
      */
     @cache(30_000, true, 10_000)
     private async getEnvListCached(_cwd: string): Promise<string[] | undefined> {
-        const result = await this.safeShellExecute(`${this._command} env list --full-path`);
+        const result = await this.safeShellExecute(`${this.command} env list --full-path`);
         if (!result) {
             return undefined;
         }
@@ -198,12 +213,16 @@ export class Poetry {
          * So we'll need to remove the string "(Activated)" after splitting lines to get the full path.
          */
         const activated = '(Activated)';
-        return result.stdout.splitLines().map((line) => {
-            if (line.endsWith(activated)) {
-                line = line.slice(0, -activated.length);
-            }
-            return line.trim();
-        });
+        const res = await Promise.all(
+            splitLines(result.stdout).map(async (line) => {
+                if (line.endsWith(activated)) {
+                    line = line.slice(0, -activated.length);
+                }
+                const folder = line.trim();
+                return (await pathExists(folder)) ? folder : undefined;
+            }),
+        );
+        return res.filter((r) => r !== undefined).map((r) => r!);
     }
 
     /**
@@ -220,7 +239,7 @@ export class Poetry {
      */
     @cache(20_000, true, 10_000)
     private async getActiveEnvPathCached(_cwd: string): Promise<string | undefined> {
-        const result = await this.safeShellExecute(`${this._command} env info -p`, true);
+        const result = await this.safeShellExecute(`${this.command} env info -p`, true);
         if (!result) {
             return undefined;
         }
@@ -232,7 +251,7 @@ export class Poetry {
      * environments are created for the directory. Corresponds to "poetry config virtualenvs.path". Swallows errors if any.
      */
     public async getVirtualenvsPathSetting(): Promise<string | undefined> {
-        const result = await this.safeShellExecute(`${this._command} config virtualenvs.path`);
+        const result = await this.safeShellExecute(`${this.command} config virtualenvs.path`);
         if (!result) {
             return undefined;
         }
@@ -261,11 +280,12 @@ export class Poetry {
 
     private async safeShellExecute(command: string, logVerbose = false) {
         // It has been observed that commands related to conda or poetry binary take upto 10-15 seconds unlike
-        // python binaries. So for now no timeouts on them.
+        // python binaries. So have a large timeout.
         const stopWatch = new StopWatch();
         const result = await shellExecute(command, {
             cwd: this.cwd,
             throwOnStdErr: true,
+            timeout: POETRY_TIMEOUT,
         }).catch((ex) => {
             if (logVerbose) {
                 traceVerbose(ex);
@@ -305,12 +325,12 @@ export async function isPoetryEnvironmentRelatedToFolder(
  *
  * @param folder Folder to look for pyproject.toml file in.
  */
-function hasValidPyprojectToml(folder: string): boolean {
+async function hasValidPyprojectToml(folder: string): Promise<boolean> {
     const pyprojectToml = path.join(folder, 'pyproject.toml');
     if (!pathExistsSync(pyprojectToml)) {
         return false;
     }
-    const content = readFileSync(pyprojectToml);
+    const content = await readFile(pyprojectToml);
     if (!content.includes('[tool.poetry]')) {
         return false;
     }

@@ -3,18 +3,17 @@
     "pythonPath": "placeholder",
     "onDidChange": false,
     "defaultInterpreterPath": "placeholder",
-    "defaultLS": true,
-    "downloadLanguageServer": true,
+    "defaultLS": false,
     "envFile": "placeholder",
     "venvPath": "placeholder",
     "venvFolders": "placeholder",
+    "activeStateToolPath": "placeholder",
     "condaPath": "placeholder",
     "pipenvPath": "placeholder",
     "poetryPath": "placeholder",
+    "pixiToolPath": "placeholder",
     "devOptions": false,
-    "disableInstallationChecks": false,
     "globalModuleInstallation": false,
-    "autoUpdateLanguageServer": false,
     "languageServer": true,
     "languageServerIsDefault": false,
     "logging": true,
@@ -27,7 +26,7 @@
     "linting": {
         "enabled": true,
         "cwd": "placeholder",
-        "Flake8Args": "placeholder",
+        "flake8Args": "placeholder",
         "flake8CategorySeverity": false,
         "flake8Enabled": true,
         "flake8Path": "placeholder",
@@ -68,51 +67,12 @@
         "extraPaths": "placeholder",
         "useLibraryCodeForTypes": true,
         "typeCheckingMode": true,
-        "diagnosticSeverityOverrides": false,
-        "diagnosticPublishDelay": false,
-        "errors": true,
-        "warnings": true,
-        "information": true,
-        "disabled": true,
-        "typeshedPaths": "placeholder",
-        "cacheFolderPath": "placeholder",
         "memory": true,
-        "logLevel": true,
         "symbolsHierarchyDepthLimit": false
-    },
-    "sortImports": {
-        "args": "placeholder",
-        "path": "placeholder"
-    },
-    "formatting": {
-        "autopep8Args": "placeholder",
-        "autopep8Path": "placeholder",
-        "provider": true,
-        "blackArgs": "placeholder",
-        "blackPath": "placeholder",
-        "yapfArgs": "placeholder",
-        "yapfPath": "placeholder"
-    },
-    "autoComplete": {
-        "addBrackets": true,
-        "extraPaths": "placeholder",
-        "showAdvancedMembers": true,
-        "typeshedPaths": "placeholder"
-    },
-    "workspaceSymbols": {
-        "ctagsPath": "placeholder",
-        "enabled": true,
-        "exclusionPatterns": true,
-        "rebuildOnFileSave": true,
-        "rebuildOnStart": true,
-        "tagFilePath": "placeholder"
     },
     "testing": {
         "cwd": "placeholder",
         "debugPort": true,
-        "nosetestArgs": "placeholder",
-        "nosetestsEnabled": true,
-        "nosetestPath": "placeholder",
         "promptToConfigure": true,
         "pytestArgs": "placeholder",
         "pytestEnabled": true,
@@ -134,6 +94,5 @@
         "enabled": true,
         "optInto": true,
         "optOutFrom": true
-    },
-    "insidersChannel": true
+    }
 }

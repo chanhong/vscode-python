@@ -14,6 +14,7 @@ import { EnvironmentTypeComparer } from '../../../client/interpreter/configurati
 import { InterpreterSelector } from '../../../client/interpreter/configuration/interpreterSelector/interpreterSelector';
 import { IInterpreterComparer, IInterpreterQuickPickItem } from '../../../client/interpreter/configuration/types';
 import { IInterpreterHelper, IInterpreterService, WorkspacePythonPath } from '../../../client/interpreter/contracts';
+import { PythonEnvType } from '../../../client/pythonEnvironments/base/info';
 import { EnvironmentType, PythonEnvironment } from '../../../client/pythonEnvironments/info';
 import { getOSType, OSType } from '../../common';
 
@@ -40,9 +41,10 @@ class InterpreterQuickPickItem implements IInterpreterQuickPickItem {
 
     public interpreter = ({} as unknown) as PythonEnvironment;
 
-    constructor(l: string, p: string) {
+    constructor(l: string, p: string, d?: string) {
         this.path = p;
         this.label = l;
+        this.description = d ?? p;
     }
 }
 
@@ -50,12 +52,8 @@ suite('Interpreters - selector', () => {
     let interpreterService: TypeMoq.IMock<IInterpreterService>;
     let fileSystem: TypeMoq.IMock<IFileSystem>;
     let newComparer: TypeMoq.IMock<IInterpreterComparer>;
-    const ignoreCache = false;
     class TestInterpreterSelector extends InterpreterSelector {
-        public async suggestionToQuickPickItem(
-            suggestion: PythonEnvironment,
-            workspaceUri?: Uri,
-        ): Promise<IInterpreterQuickPickItem> {
+        public suggestionToQuickPickItem(suggestion: PythonEnvironment, workspaceUri?: Uri): IInterpreterQuickPickItem {
             return super.suggestionToQuickPickItem(suggestion, workspaceUri);
         }
     }
@@ -89,12 +87,18 @@ suite('Interpreters - selector', () => {
                 { displayName: '2 (virtualenv)', path: 'c:/path2/path2', envType: EnvironmentType.VirtualEnv },
                 { displayName: '3', path: 'c:/path2/path2', envType: EnvironmentType.Unknown },
                 { displayName: '4', path: 'c:/path4/path4', envType: EnvironmentType.Conda },
+                {
+                    displayName: '5',
+                    path: 'c:/path5/path',
+                    envPath: 'c:/path5/path/to/env',
+                    envType: EnvironmentType.Conda,
+                },
             ].map((item) => ({ ...info, ...item }));
             interpreterService
-                .setup((x) => x.getAllInterpreters(TypeMoq.It.isAny(), { onSuggestion: true, ignoreCache }))
+                .setup((x) => x.getAllInterpreters(TypeMoq.It.isAny()))
                 .returns(() => new Promise((resolve) => resolve(initial)));
 
-            const actual = await selector.getSuggestions(undefined, ignoreCache);
+            const actual = await selector.getAllSuggestions(undefined);
 
             const expected: InterpreterQuickPickItem[] = [
                 new InterpreterQuickPickItem('1', 'c:/path1/path1'),
@@ -103,6 +107,7 @@ suite('Interpreters - selector', () => {
                 new InterpreterQuickPickItem('2 (virtualenv)', 'c:/path2/path2'),
                 new InterpreterQuickPickItem('3', 'c:/path2/path2'),
                 new InterpreterQuickPickItem('4', 'c:/path4/path4'),
+                new InterpreterQuickPickItem('5', 'c:/path5/path/to/env', 'c:/path5/path/to/env'),
             ];
 
             assert.strictEqual(actual.length, expected.length, 'Suggestion lengths are different.');
@@ -110,12 +115,17 @@ suite('Interpreters - selector', () => {
                 assert.strictEqual(
                     actual[i].label,
                     expected[i].label,
-                    `Suggestion label is different at ${i}: exected '${expected[i].label}', found '${actual[i].label}'.`,
+                    `Suggestion label is different at ${i}: expected '${expected[i].label}', found '${actual[i].label}'.`,
                 );
                 assert.strictEqual(
                     actual[i].path,
                     expected[i].path,
-                    `Suggestion path is different at ${i}: exected '${expected[i].path}', found '${actual[i].path}'.`,
+                    `Suggestion path is different at ${i}: expected '${expected[i].path}', found '${actual[i].path}'.`,
+                );
+                assert.strictEqual(
+                    actual[i].description,
+                    expected[i].description,
+                    `Suggestion description is different at ${i}: expected '${expected[i].description}', found '${actual[i].description}'.`,
                 );
             }
         });
@@ -130,12 +140,14 @@ suite('Interpreters - selector', () => {
                 envPath: path.join('path', 'to', 'another', 'workspace', '.venv'),
                 path: path.join('path', 'to', 'another', 'workspace', '.venv', 'bin', 'python'),
                 envType: EnvironmentType.Venv,
+                type: PythonEnvType.Virtual,
             },
             {
                 displayName: 'two',
                 envPath: path.join(workspacePath, '.venv'),
                 path: path.join(workspacePath, '.venv', 'bin', 'python'),
                 envType: EnvironmentType.Venv,
+                type: PythonEnvType.Virtual,
             },
             {
                 displayName: 'three',
@@ -149,11 +161,12 @@ suite('Interpreters - selector', () => {
                 path: path.join('a', 'conda', 'environment'),
                 envName: 'conda-env',
                 envType: EnvironmentType.Conda,
+                type: PythonEnvType.Conda,
             },
         ].map((item) => ({ ...info, ...item }));
 
         interpreterService
-            .setup((x) => x.getAllInterpreters(TypeMoq.It.isAny(), { onSuggestion: true, ignoreCache }))
+            .setup((x) => x.getAllInterpreters(TypeMoq.It.isAny()))
             .returns(() => new Promise((resolve) => resolve(environments)));
 
         const interpreterHelper = TypeMoq.Mock.ofType<IInterpreterHelper>();
@@ -169,7 +182,7 @@ suite('Interpreters - selector', () => {
             new PathUtils(getOSType() === OSType.Windows),
         );
 
-        const result = await selector.getSuggestions(undefined, ignoreCache);
+        const result = await selector.getAllSuggestions(undefined);
 
         const expected: InterpreterQuickPickItem[] = [
             new InterpreterQuickPickItem('two', path.join(workspacePath, '.venv', 'bin', 'python')),
@@ -187,12 +200,12 @@ suite('Interpreters - selector', () => {
             assert.strictEqual(
                 result[i].label,
                 expected[i].label,
-                `Suggestion label is different at ${i}: exected '${expected[i].label}', found '${result[i].label}'.`,
+                `Suggestion label is different at ${i}: expected '${expected[i].label}', found '${result[i].label}'.`,
             );
             assert.strictEqual(
                 result[i].path,
                 expected[i].path,
-                `Suggestion path is different at ${i}: exected '${expected[i].path}', found '${result[i].path}'.`,
+                `Suggestion path is different at ${i}: expected '${expected[i].path}', found '${result[i].path}'.`,
             );
         }
     });

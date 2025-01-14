@@ -2,11 +2,18 @@
 // Licensed under the MIT License.
 
 import { Uri } from 'vscode';
-import { traceVerbose } from '../../common/logger';
 import { createDeferred } from '../../common/utils/async';
 import { getURIFilter } from '../../common/utils/misc';
+import { traceVerbose } from '../../logging';
 import { PythonEnvInfo } from './info';
-import { IPythonEnvsIterator, PythonEnvUpdatedEvent, PythonLocatorQuery } from './locator';
+import {
+    IPythonEnvsIterator,
+    isProgressEvent,
+    ProgressNotificationEvent,
+    ProgressReportStage,
+    PythonEnvUpdatedEvent,
+    PythonLocatorQuery,
+} from './locator';
 
 /**
  * Create a filter function to match the given query.
@@ -55,7 +62,6 @@ function getSearchLocationFilters(query: PythonLocatorQuery): ((u: Uri) => boole
     return query.searchLocations.roots.map((loc) =>
         getURIFilter(loc, {
             checkParent: true,
-            checkExact: true,
         }),
     );
 }
@@ -72,11 +78,14 @@ export async function getEnvs<I = PythonEnvInfo>(iterator: IPythonEnvsIterator<I
     if (iterator.onUpdated === undefined) {
         updatesDone.resolve();
     } else {
-        const listener = iterator.onUpdated((event: PythonEnvUpdatedEvent<I> | null) => {
-            if (event === null) {
+        const listener = iterator.onUpdated((event: PythonEnvUpdatedEvent<I> | ProgressNotificationEvent) => {
+            if (isProgressEvent(event)) {
+                if (event.stage !== ProgressReportStage.discoveryFinished) {
+                    return;
+                }
                 updatesDone.resolve();
                 listener.dispose();
-            } else {
+            } else if (event.index !== undefined) {
                 const { index, update } = event;
                 if (envs[index] === undefined) {
                     const json = JSON.stringify(update);

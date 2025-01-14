@@ -8,14 +8,12 @@ import { TextDocument } from 'vscode';
 import { IApplicationDiagnostics } from '../application/types';
 import { IActiveResourceService, IDocumentManager, IWorkspaceService } from '../common/application/types';
 import { PYTHON_LANGUAGE } from '../common/constants';
-import { DeprecatePythonPath } from '../common/experiments/groups';
-import { traceDecorators } from '../common/logger';
 import { IFileSystem } from '../common/platform/types';
-import { IDisposable, IExperimentService, IInterpreterPathService, Resource } from '../common/types';
+import { IDisposable, IInterpreterPathService, Resource } from '../common/types';
 import { Deferred } from '../common/utils/async';
-import { addItemsToRunAfterActivation } from '../common/utils/runAfterActivation';
+import { StopWatch } from '../common/utils/stopWatch';
 import { IInterpreterAutoSelectionService } from '../interpreter/autoSelection/types';
-import { IInterpreterService } from '../interpreter/contracts';
+import { traceDecoratorError } from '../logging';
 import { sendActivationTelemetry } from '../telemetry/envFileTelemetry';
 import { IExtensionActivationManager, IExtensionActivationService, IExtensionSingleActivationService } from './types';
 
@@ -30,19 +28,36 @@ export class ExtensionActivationManager implements IExtensionActivationManager {
     private docOpenedHandler?: IDisposable;
 
     constructor(
-        @multiInject(IExtensionActivationService) private readonly activationServices: IExtensionActivationService[],
+        @multiInject(IExtensionActivationService) private activationServices: IExtensionActivationService[],
         @multiInject(IExtensionSingleActivationService)
-        private readonly singleActivationServices: IExtensionSingleActivationService[],
+        private singleActivationServices: IExtensionSingleActivationService[],
         @inject(IDocumentManager) private readonly documentManager: IDocumentManager,
-        @inject(IInterpreterService) private readonly interpreterService: IInterpreterService,
         @inject(IInterpreterAutoSelectionService) private readonly autoSelection: IInterpreterAutoSelectionService,
         @inject(IApplicationDiagnostics) private readonly appDiagnostics: IApplicationDiagnostics,
         @inject(IWorkspaceService) private readonly workspaceService: IWorkspaceService,
         @inject(IFileSystem) private readonly fileSystem: IFileSystem,
         @inject(IActiveResourceService) private readonly activeResourceService: IActiveResourceService,
-        @inject(IExperimentService) private readonly experiments: IExperimentService,
         @inject(IInterpreterPathService) private readonly interpreterPathService: IInterpreterPathService,
     ) {}
+
+    private filterServices() {
+        if (!this.workspaceService.isTrusted) {
+            this.activationServices = this.activationServices.filter(
+                (service) => service.supportedWorkspaceTypes.untrustedWorkspace,
+            );
+            this.singleActivationServices = this.singleActivationServices.filter(
+                (service) => service.supportedWorkspaceTypes.untrustedWorkspace,
+            );
+        }
+        if (this.workspaceService.isVirtualWorkspace) {
+            this.activationServices = this.activationServices.filter(
+                (service) => service.supportedWorkspaceTypes.virtualWorkspace,
+            );
+            this.singleActivationServices = this.singleActivationServices.filter(
+                (service) => service.supportedWorkspaceTypes.virtualWorkspace,
+            );
+        }
+    }
 
     public dispose(): void {
         while (this.disposables.length > 0) {
@@ -55,36 +70,35 @@ export class ExtensionActivationManager implements IExtensionActivationManager {
         }
     }
 
-    public async activate(): Promise<void> {
+    public async activate(startupStopWatch: StopWatch): Promise<void> {
+        this.filterServices();
         await this.initialize();
+
         // Activate all activation services together.
+
         await Promise.all([
-            Promise.all(this.singleActivationServices.map((item) => item.activate())),
-            this.activateWorkspace(this.activeResourceService.getActiveResource()),
+            ...this.singleActivationServices.map((item) => item.activate()),
+            this.activateWorkspace(this.activeResourceService.getActiveResource(), startupStopWatch),
         ]);
     }
 
-    @traceDecorators.error('Failed to activate a workspace')
-    public async activateWorkspace(resource: Resource): Promise<void> {
+    @traceDecoratorError('Failed to activate a workspace')
+    public async activateWorkspace(resource: Resource, startupStopWatch?: StopWatch): Promise<void> {
+        const folder = this.workspaceService.getWorkspaceFolder(resource);
+        resource = folder ? folder.uri : undefined;
         const key = this.getWorkspaceKey(resource);
         if (this.activatedWorkspaces.has(key)) {
             return;
         }
         this.activatedWorkspaces.add(key);
 
-        if (this.experiments.inExperimentSync(DeprecatePythonPath.experiment)) {
+        if (this.workspaceService.isTrusted) {
+            // Do not interact with interpreters in a untrusted workspace.
+            await this.autoSelection.autoSelectInterpreter(resource);
             await this.interpreterPathService.copyOldInterpreterStorageValuesToNew(resource);
         }
-
-        // Get latest interpreter list in the background.
-        addItemsToRunAfterActivation(() => {
-            this.interpreterService.getInterpreters(resource).ignoreErrors();
-        });
-
         await sendActivationTelemetry(this.fileSystem, this.workspaceService, resource);
-
-        await this.autoSelection.autoSelectInterpreter(resource);
-        await Promise.all(this.activationServices.map((item) => item.activate(resource)));
+        await Promise.all(this.activationServices.map((item) => item.activate(resource, startupStopWatch)));
         await this.appDiagnostics.performPreStartupHealthCheck(resource);
     }
 
@@ -98,15 +112,15 @@ export class ExtensionActivationManager implements IExtensionActivationManager {
             return;
         }
         const key = this.getWorkspaceKey(doc.uri);
+        const hasWorkspaceFolders = (this.workspaceService.workspaceFolders?.length || 0) > 0;
         // If we have opened a doc that does not belong to workspace, then do nothing.
-        if (key === '' && this.workspaceService.hasWorkspaceFolders) {
+        if (key === '' && hasWorkspaceFolders) {
             return;
         }
         if (this.activatedWorkspaces.has(key)) {
             return;
         }
-        const folder = this.workspaceService.getWorkspaceFolder(doc.uri);
-        this.activateWorkspace(folder ? folder.uri : undefined).ignoreErrors();
+        this.activateWorkspace(doc.uri).ignoreErrors();
     }
 
     protected addHandlers(): void {
@@ -142,7 +156,7 @@ export class ExtensionActivationManager implements IExtensionActivationManager {
     }
 
     protected hasMultipleWorkspaces(): boolean {
-        return this.workspaceService.hasWorkspaceFolders && this.workspaceService.workspaceFolders!.length > 1;
+        return (this.workspaceService.workspaceFolders?.length || 0) > 1;
     }
 
     protected getWorkspaceKey(resource: Resource): string {

@@ -3,9 +3,9 @@
 import { inject, injectable } from 'inversify';
 import { Uri } from 'vscode';
 import { IApplicationShell, IWorkspaceService } from '../../common/application/types';
-import { traceError } from '../../common/logger';
 import { IConfigurationService, Product } from '../../common/types';
 import { IServiceContainer } from '../../ioc/types';
+import { traceError } from '../../logging';
 import { sendTelemetryEvent } from '../../telemetry';
 import { EventName } from '../../telemetry/constants';
 import { TestConfiguringTelemetry } from '../../telemetry/types';
@@ -33,6 +33,11 @@ export class UnitTestConfigurationService implements ITestConfigurationService {
         this.configurationService = serviceContainer.get<IConfigurationService>(IConfigurationService);
         this.appShell = serviceContainer.get<IApplicationShell>(IApplicationShell);
         this.workspaceService = serviceContainer.get<IWorkspaceService>(IWorkspaceService);
+    }
+
+    public hasConfiguredTests(wkspace: Uri): boolean {
+        const settings = this.configurationService.getSettings(wkspace);
+        return settings.testing.pytestEnabled || settings.testing.unittestEnabled || false;
     }
 
     public async displayTestFrameworkError(wkspace: Uri): Promise<void> {

@@ -5,9 +5,8 @@
 
 // Must always be on top to setup expected env.
 process.env.VSC_PYTHON_SMOKE_TEST = '1';
-
 import { spawn } from 'child_process';
-import * as fs from 'fs-extra';
+import * as fs from '../client/common/platform/fs-paths';
 import * as glob from 'glob';
 import * as path from 'path';
 import { unzip } from './common';
@@ -16,7 +15,7 @@ import { EXTENSION_ROOT_DIR_FOR_TESTS, SMOKE_TEST_EXTENSIONS_DIR } from './const
 class TestRunner {
     public async start() {
         console.log('Start Test Runner');
-        await this.enableLanguageServer(true);
+        await this.enableLanguageServer();
         await this.extractLatestExtension(SMOKE_TEST_EXTENSIONS_DIR);
         await this.launchSmokeTests();
     }
@@ -28,9 +27,9 @@ class TestRunner {
 
         await this.launchTest(env);
     }
-    private async enableLanguageServer(enable: boolean) {
+    private async enableLanguageServer() {
         // When running smoke tests, we won't have access to unbundled files.
-        const settings = `{ "python.languageServer": ${enable ? '"Microsoft"' : '"Jedi"'} }`;
+        const settings = `{ "python.languageServer": "Jedi" }`;
         await fs.ensureDir(
             path.join(EXTENSION_ROOT_DIR_FOR_TESTS, 'src', 'testMultiRootWkspc', 'smokeTests', '.vscode'),
         );
@@ -81,7 +80,7 @@ class TestRunner {
 
     private async extractLatestExtension(targetDir: string): Promise<void> {
         const extensionFile = await new Promise<string>((resolve, reject) =>
-            glob('*.vsix', (ex, files) => (ex ? reject(ex) : resolve(files[0]))),
+            glob.default('*.vsix', (ex, files) => (ex ? reject(ex) : resolve(files[0]))),
         );
         await unzip(extensionFile, targetDir);
     }
